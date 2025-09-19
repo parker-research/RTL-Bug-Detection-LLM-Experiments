@@ -205,7 +205,10 @@ def main(*, repo_url: str, work_dir: Path, out_root: Path) -> None:
 
         relpath = changed_files_list[0]
         dest_dir_name = (
-            branch_name.replace("#", "_").replace("fix_", "").replace("()", "")
+            branch_name.replace("#", "_")
+            .replace("fix_", "")
+            .replace("()", "")
+            .replace("fix-", "")
         )
         (dest_dir := out_root / dest_dir_name).mkdir(parents=True, exist_ok=True)
 
