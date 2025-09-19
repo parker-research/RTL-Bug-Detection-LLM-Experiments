@@ -139,7 +139,18 @@ def main(*, repo_url: str, work_dir: Path, out_root: Path) -> None:
     output_metadata_list: list[dict[str, Any]] = []
 
     for branch_name in branches:
-        logger.info("\n=== Processing branch: {} ===", branch_name)
+        logger.info(f"=== Processing branch: {branch_name} ===")
+
+        if branch_name == "fix_cwe_1244_in_csr_regfile" and repo_url.endswith(
+            "hackatdac19"
+        ):
+            # This branch is a duplicate of 'fix_cwe_1244_in_csr_regfile_new' - skip.
+            logger.debug(
+                f'Branch "{branch_name}" in hackatdac19 is a duplicate. Skipping.'
+            )
+            skipped_count += 1
+            continue
+
         branch_ref = repo.remotes.origin.refs[branch_name]
 
         # Diff against the branch point with main.
@@ -150,20 +161,47 @@ def main(*, repo_url: str, work_dir: Path, out_root: Path) -> None:
 
         if len(changed_files_list) == 0:
             logger.warning(
-                f"Branch '{branch_name}' has no changes since branch point with main. "
+                f'Branch "{branch_name}" has no changes since branch point with main. '
                 "Skipping."
             )
             skipped_count += 1
             continue
         if len(changed_files_list) > 1:
-            logger.warning(
-                "Branch '{}' changed {} files since branch point ({}); skipping.",
-                branch_name,
-                len(changed_files_list),
-                ", ".join(changed_files_list),
-            )
-            skipped_count += 1
-            continue
+            if (branch_name == "fix_cwe_1317_in_clint") and repo_url.endswith(
+                "hackatdac21"
+            ):
+                # https://github.com/HACK-EVENT/hackatdac21/compare/main...fix_cwe_1317_in_clint
+                # Special override: Select the most influential file.
+                logger.debug(f"Special override for branch {branch_name}")
+
+                assert set(changed_files_list) == {
+                    "piton/design/chip/tile/ariane/openpiton/riscv_peripherals.sv",
+                    "piton/design/chip/tile/ariane/src/clint/clint.sv",
+                }
+                changed_files_list = [
+                    "piton/design/chip/tile/ariane/src/clint/clint.sv"
+                ]
+
+            elif branch_name == "fix_cwe_1245" and repo_url.endswith("hackatdac21"):
+                # https://github.com/HACK-EVENT/hackatdac21/compare/main...fix_cwe_1245
+                # Special override: Select the most influential file with the bug.
+                # Note: In the future, we COULD split out both files.
+                logger.debug(f"Special override for branch {branch_name}")
+                assert set(changed_files_list) == {
+                    "piton/design/chip/tile/ariane/src/sha256/sha256.v",
+                    "piton/design/chip/tile/ariane/src/dma/dma.sv",
+                }
+                changed_files_list = [
+                    "piton/design/chip/tile/ariane/src/sha256/sha256.v",
+                ]
+
+            else:
+                logger.warning(
+                    f'Branch "{branch_name}" changed {len(changed_files_list)} files '
+                    f"since branch point ({'.'.join(changed_files_list)}); skipping."
+                )
+                skipped_count += 1
+                continue
 
         relpath = changed_files_list[0]
         dest_dir_name = (
@@ -183,12 +221,8 @@ def main(*, repo_url: str, work_dir: Path, out_root: Path) -> None:
             write_blob_at(base_commit, relpath, dest_dir / buggy_name)
         except FileNotFoundError:
             logger.warning(
-                (
-                    "Path '{}' does not exist at the branch point "
-                    "(merge-base with main); skipping branch '{}'."
-                ),
-                relpath,
-                branch_name,
+                f"Path '{relpath}' does not exist at the branch point "
+                f"(merge-base with main); skipping branch '{branch_name}'."
             )
             skipped_count += 1
             continue
@@ -230,11 +264,10 @@ def main(*, repo_url: str, work_dir: Path, out_root: Path) -> None:
     df_metadata.write_csv(out_root / "all_metadata.csv")
     df_metadata.write_parquet(out_root / "all_metadata.pq")
 
-    logger.info(
-        "\nDone. Processed: {}, skipped: {}. Output root: {}",
+    logger.success(
+        "Done. Processed: {}, skipped: {}.",
         processed_count,
         skipped_count,
-        out_root,
     )
 
 
