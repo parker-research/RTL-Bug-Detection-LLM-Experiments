@@ -1,7 +1,7 @@
 """Export per-branch single-file diffs vs main for HACK-EVENT/hackatdac21.
 
 Steps implemented:
-1) Clone https://github.com/HACK-EVENT/hackatdac21 into Path(__file__).with_name("working")
+1) Clone https://github.com/HACK-EVENT/hackatdac21
 2) For each remote branch (except main/HEAD):
    - Create out/hackatdac21/<branch_name>/
    - Compute list of files changed vs origin/main
@@ -14,8 +14,11 @@ Steps implemented:
 """
 
 from pathlib import Path
+from typing import Any
 
 import git
+import orjson
+import polars as pl
 from beartype import beartype
 from loguru import logger
 
@@ -57,16 +60,39 @@ def list_remote_branches(repo: git.Repo) -> list[str]:
     return names
 
 
-def changed_files_vs_main(repo: git.Repo, branch_name: str) -> list[str]:
-    """Return a list of repo-relative paths changed between main and <branch_name>.
+def branch_point_commit(repo: git.Repo, branch_name: str) -> git.Commit:
+    """Return the merge-base commit between origin/main and origin/<branch_name>."""
+    try:
+        main_commit = repo.remotes.origin.refs["main"].commit
+    except Exception as e:
+        msg = "origin/main not found. Does the repo use 'main' as default branch?"
+        raise RuntimeError(msg) from e
+
+    try:
+        branch_commit = repo.remotes.origin.refs[branch_name].commit
+    except Exception as e:
+        msg = f"origin/{branch_name} not found."
+        raise RuntimeError(msg) from e
+
+    bases = repo.merge_base(main_commit, branch_commit)
+    if not bases:
+        msg = f"No merge-base between origin/main and origin/{branch_name}."
+        raise RuntimeError(msg)
+    return bases[0]
+
+
+def changed_files_since_branch_point(repo: git.Repo, branch_name: str) -> list[str]:
+    """Return repo-relative paths changed from branch-point -> branch tip.
 
     Includes added/modified/renamed/deleted paths from the branch's perspective.
+    Uses destination names for renames.
     """
-    a = repo.remotes.origin.refs["main"].commit
-    b = repo.remotes.origin.refs[branch_name].commit
-    # Use name-only output via git to keep rename paths as destination names.
+    base = branch_point_commit(repo, branch_name)
+    tip = repo.remotes.origin.refs[branch_name].commit
+
     try:
-        out = repo.git.diff("--name-only", f"{a.hexsha}", f"{b.hexsha}")
+        # name-only output keeps rename targets as destination names (relative to tip).
+        out = repo.git.diff("--name-only", f"{base.hexsha}", f"{tip.hexsha}")
     except git.GitCommandError as e:
         msg = f"git diff failed for branch {branch_name}: {e}"
         raise RuntimeError(msg) from e
@@ -80,104 +106,134 @@ def write_blob_at(commit: git.Commit, relative_path: str, dest: Path) -> None:
 
     Raises FileNotFoundError if missing.
     """
-    # Navigate the tree to the blob
     parts = Path(relative_path).parts
     tree = commit.tree
     try:
         for part in parts:
             tree = tree / part  # type: ignore[assignment]
-        blob = tree  # type: ignore[assignment]
-        data: bytes = blob.data_stream.read()
+        data: bytes = tree.data_stream.read()  # type: ignore[union-attr]
+        assert isinstance(data, bytes)
     except Exception as e:
         msg = f"{relative_path} not found in commit {commit.hexsha[:7]}: {e}"
         raise FileNotFoundError(msg) from e
     dest.parent.mkdir(parents=True, exist_ok=True)
-
     dest.write_bytes(data)
 
 
 def main(*, repo_url: str, work_dir: Path, out_root: Path) -> None:
-    """Run the normalization process."""
+    """Run the export process."""
     repo = ensure_clone(repo_url=repo_url, work_dir=work_dir)
 
-    # Make sure we have origin/main
+    # Ensure origin/main exists.
     try:
-        main_ref = repo.remotes.origin.refs["main"]
+        _ = repo.remotes.origin.refs["main"]
     except Exception as e:
         msg = "origin/main not found. Does the repo use 'main' as default branch?"
         raise RuntimeError(msg) from e
 
-    branches = list_remote_branches(repo)
+    branches: list[str] = list_remote_branches(repo)
 
-    skipped = 0
-    processed = 0
+    skipped_count = 0
+    processed_count = 0
 
-    for br in branches:
-        logger.info("\n=== Processing branch: {} ===", br)
-        branch_ref = repo.remotes.origin.refs[br]
-        changed_files_list = changed_files_vs_main(repo, br)
+    output_metadata_list: list[dict[str, Any]] = []
+
+    for branch_name in branches:
+        logger.info("\n=== Processing branch: {} ===", branch_name)
+        branch_ref = repo.remotes.origin.refs[branch_name]
+
+        # Diff against the branch point with main.
+        changed_files_list = changed_files_since_branch_point(repo, branch_name)
 
         # Exclude README.md changes.
         changed_files_list = sorted(set(changed_files_list) - {"README.md"})
 
         if len(changed_files_list) == 0:
-            logger.warning("Branch '{}' has no changes vs main; skipping.", br)
-            skipped += 1
+            logger.warning(
+                f"Branch '{branch_name}' has no changes since branch point with main. "
+                "Skipping."
+            )
+            skipped_count += 1
             continue
         if len(changed_files_list) > 1:
             logger.warning(
-                "Branch '{}' changed {} files vs main ({}); skipping as per requirement.",
-                br,
+                "Branch '{}' changed {} files since branch point ({}); skipping.",
+                branch_name,
                 len(changed_files_list),
                 ", ".join(changed_files_list),
             )
-            skipped += 1
+            skipped_count += 1
             continue
 
         relpath = changed_files_list[0]
-        dest_dir = out_root / br
-        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest_dir_name = (
+            branch_name.replace("#", "_").replace("fix_", "").replace("()", "")
+        )
+        (dest_dir := out_root / dest_dir_name).mkdir(parents=True, exist_ok=True)
 
         ext = Path(relpath).suffix  # includes leading dot, or '' if none
         buggy_name = f"buggy{ext}" if ext else "buggy"
         base_name = f"base{ext}" if ext else "base"
 
-        # Write main version -> buggy
+        # Compute branch point.
+        base_commit = branch_point_commit(repo, branch_name)
+
+        # Write branch-point version -> buggy.
         try:
-            write_blob_at(main_ref.commit, relpath, dest_dir / buggy_name)
+            write_blob_at(base_commit, relpath, dest_dir / buggy_name)
         except FileNotFoundError:
             logger.warning(
-                "Path '{}' does not exist on origin/main; skipping branch '{}'.",
+                (
+                    "Path '{}' does not exist at the branch point "
+                    "(merge-base with main); skipping branch '{}'."
+                ),
                 relpath,
-                br,
+                branch_name,
             )
-            skipped += 1
+            skipped_count += 1
             continue
 
-        # Write branch version -> base
+        # Write branch tip version -> base
         try:
             write_blob_at(branch_ref.commit, relpath, dest_dir / base_name)
         except FileNotFoundError as e:
-            logger.warning("{}; skipping branch '{}'", e, br)
-            skipped += 1
+            logger.warning("{}; skipping branch '{}'", e, branch_name)
+            skipped_count += 1
             continue
 
-        # Write source_path.txt
-        (dest_dir / "source_path.txt").write_text(relpath + "\n", encoding="utf-8")
+        # Write metadata.json.
+        metadata = {
+            "branch_name": branch_name,
+            "output_folder": dest_dir_name,
+            "source_path": relpath,
+            "buggy_commit": base_commit.hexsha,
+            "base_commit": branch_ref.commit.hexsha,
+            "git_repo": repo_url,
+        }
+        (dest_dir / "metadata.json").write_bytes(
+            orjson.dumps(metadata, option=orjson.OPT_INDENT_2)
+        )
+        output_metadata_list.append(metadata)
 
         logger.success(
-            "Wrote {} and {} for '{}' (source: {})",
+            "Wrote {} (branch-point) and {} (branch tip) for '{}' (source: {})",
             buggy_name,
             base_name,
-            br,
+            branch_name,
             relpath,
         )
-        processed += 1
+        processed_count += 1
+
+    # Write summary metadata.json.
+    df_metadata = pl.DataFrame(output_metadata_list)
+    df_metadata.write_ndjson(out_root / "all_metadata.ndjson")
+    df_metadata.write_csv(out_root / "all_metadata.csv")
+    df_metadata.write_parquet(out_root / "all_metadata.pq")
 
     logger.info(
         "\nDone. Processed: {}, skipped: {}. Output root: {}",
-        processed,
-        skipped,
+        processed_count,
+        skipped_count,
         out_root,
     )
 
