@@ -120,8 +120,15 @@ def write_blob_at(commit: git.Commit, relative_path: str, dest: Path) -> None:
     dest.write_bytes(data)
 
 
-def main(*, repo_url: str, work_dir: Path, out_root: Path) -> None:
-    """Run the export process."""
+def process_one_repository(
+    *, repo_name: str, repo_url: str, work_dir: Path, out_root: Path
+) -> pl.DataFrame:
+    """Parse repository, organize it.
+
+    Note: The branches contain commits which fix a bug, and the main branch contains
+    the buggy version. A little bit counter-intuitive, compared to how the experiment
+    would be setup.
+    """
     repo = ensure_clone(repo_url=repo_url, work_dir=work_dir)
 
     # Ensure origin/main exists.
@@ -141,8 +148,8 @@ def main(*, repo_url: str, work_dir: Path, out_root: Path) -> None:
     for branch_name in branches:
         logger.info(f"=== Processing branch: {branch_name} ===")
 
-        if branch_name == "fix_cwe_1244_in_csr_regfile" and repo_url.endswith(
-            "hackatdac19"
+        if (branch_name == "fix_cwe_1244_in_csr_regfile") and (
+            repo_name == "hackatdac19"
         ):
             # This branch is a duplicate of 'fix_cwe_1244_in_csr_regfile_new' - skip.
             logger.debug(
@@ -167,8 +174,8 @@ def main(*, repo_url: str, work_dir: Path, out_root: Path) -> None:
             skipped_count += 1
             continue
         if len(changed_files_list) > 1:
-            if (branch_name == "fix_cwe_1317_in_clint") and repo_url.endswith(
-                "hackatdac21"
+            if (branch_name == "fix_cwe_1317_in_clint") and (
+                repo_name == "hackatdac21"
             ):
                 # https://github.com/HACK-EVENT/hackatdac21/compare/main...fix_cwe_1317_in_clint
                 # Special override: Select the most influential file.
@@ -182,7 +189,7 @@ def main(*, repo_url: str, work_dir: Path, out_root: Path) -> None:
                     "piton/design/chip/tile/ariane/src/clint/clint.sv"
                 ]
 
-            elif branch_name == "fix_cwe_1245" and repo_url.endswith("hackatdac21"):
+            elif (branch_name == "fix_cwe_1245") and (repo_name == "hackatdac21"):
                 # https://github.com/HACK-EVENT/hackatdac21/compare/main...fix_cwe_1245
                 # Special override: Select the most influential file with the bug.
                 # Note: In the future, we COULD split out both files.
@@ -205,10 +212,14 @@ def main(*, repo_url: str, work_dir: Path, out_root: Path) -> None:
 
         relpath = changed_files_list[0]
         dest_dir_name = (
-            branch_name.replace("#", "_")
-            .replace("fix_", "")
-            .replace("()", "")
-            .replace("fix-", "")
+            repo_name
+            + "_"
+            + (
+                branch_name.replace("#", "_")
+                .replace("fix_", "")
+                .replace("()", "")
+                .replace("fix-", "")
+            )
         )
         (dest_dir := out_root / dest_dir_name).mkdir(parents=True, exist_ok=True)
 
@@ -240,12 +251,12 @@ def main(*, repo_url: str, work_dir: Path, out_root: Path) -> None:
 
         # Write metadata.json.
         metadata = {
-            "branch_name": branch_name,
             "output_folder": dest_dir_name,
+            "git_repo": repo_url,
+            "branch_name": branch_name,
             "source_path": relpath,
             "buggy_commit": base_commit.hexsha,
-            "base_commit": branch_ref.commit.hexsha,
-            "git_repo": repo_url,
+            "fixed_commit": branch_ref.commit.hexsha,
         }
         (dest_dir / "metadata.json").write_bytes(
             orjson.dumps(metadata, option=orjson.OPT_INDENT_2)
@@ -261,17 +272,13 @@ def main(*, repo_url: str, work_dir: Path, out_root: Path) -> None:
         )
         processed_count += 1
 
-    # Write summary metadata.json.
-    df_metadata = pl.DataFrame(output_metadata_list)
-    df_metadata.write_ndjson(out_root / "all_metadata.ndjson")
-    df_metadata.write_csv(out_root / "all_metadata.csv")
-    df_metadata.write_parquet(out_root / "all_metadata.pq")
-
     logger.success(
         "Done. Processed: {}, skipped: {}.",
         processed_count,
         skipped_count,
     )
+
+    return pl.DataFrame(output_metadata_list)
 
 
 @beartype
@@ -286,17 +293,32 @@ def get_repo_root_path() -> Path:
     return Path(repo_root)
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Run the normalization for both hackatdac19 and hackatdac21."""
     repo_root = get_repo_root_path()
 
-    main(
+    out_root = (repo_root / "out").resolve()
+
+    df1 = process_one_repository(
+        repo_name="hackatdac19",
         repo_url="https://github.com/HACK-EVENT/hackatdac19",
         work_dir=(repo_root / "working" / "hackatdac19").resolve(),
-        out_root=(repo_root / "out" / "hackatdac19").resolve(),
+        out_root=out_root,
     )
 
-    main(
+    df2 = process_one_repository(
+        repo_name="hackatdac21",
         repo_url="https://github.com/HACK-EVENT/hackatdac21",
         work_dir=(repo_root / "working" / "hackatdac21").resolve(),
-        out_root=(repo_root / "out" / "hackatdac21").resolve(),
+        out_root=out_root,
     )
+
+    df_metadata = pl.concat([df1, df2], how="vertical")
+
+    df_metadata.write_ndjson(out_root / "all_metadata.ndjson")
+    df_metadata.write_csv(out_root / "all_metadata.csv")
+    df_metadata.write_parquet(out_root / "all_metadata.pq")
+
+
+if __name__ == "__main__":
+    main()
