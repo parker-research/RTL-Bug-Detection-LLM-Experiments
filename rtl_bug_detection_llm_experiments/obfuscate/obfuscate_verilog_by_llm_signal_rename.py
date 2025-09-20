@@ -46,7 +46,10 @@ import sys
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
+import orjson
+from beartype import beartype
 from loguru import logger
 
 from rtl_bug_detection_llm_experiments.llm import prompt_llm
@@ -287,15 +290,14 @@ def build_prompt_for_batch(batch: list[str]) -> str:
     names_json = json.dumps(batch, indent=2)
     prompt = (
         "You are given a JSON array of Verilog signal names. "
-        "Return a STRICT JSON object mapping each\n"
-        "old name to a new preferred obfuscated name. "
-        "The output MUST be valid JSON and contain exactly\n"
+        "Return a json object mapping each "
+        "old name to a new similar-but-different name. "
+        "The output MUST be valid JSON and contain exactly "
         "one key for each input name. Do not add any commentary. Example output:\n"
         '{"old_name":"new_name", "another_old":"another_new"}\n\n'
         "Constraints for new names:\n"
         "- Must be valid Verilog identifiers "
         "(start with letter or underscore, then letters/digits/_/$).\n"
-        "- Prefer readable short names (but obfuscated), e.g. s1, r_12, net_3, fooA.\n"
         "- Do NOT produce names that collide with Verilog keywords or system "
         "identifiers.\n\n"
         "Input names:\n"
@@ -315,32 +317,20 @@ def ask_llm_for_mapping(names: list[str], batch_size: int = 200) -> dict[str, st
         prompt = build_prompt_for_batch(batch)
         logger.info(f"[LLM] Requesting mapping for batch of {len(batch)} names...")
         resp = prompt_llm(prompt)
-        # Attempt to parse JSON from the response - be forgiving (strip surrounding
-        # whitespace).
-        try:
-            parsed = json.loads(resp)
-            if not isinstance(parsed, dict):
-                msg = "LLM did not return a JSON object."
-                raise TypeError(msg)
-        except Exception as e:
-            # Try to extract JSON snippet naive approach
-            logger.info(
-                "[LLM] Warning: response not valid JSON or parse failed. "
-                "Attempting to salvage JSON substring..."
+
+        parsed = extract_json_substring(resp)
+        if parsed is None:
+            logger.error(
+                f"[LLM] Error: could not parse JSON from LLM response:\n{resp}"
             )
-            json_sub = extract_json_substring(resp)
-            if json_sub is None:
-                msg = f"Failed to parse LLM response as JSON. Raw response:\n{resp}"
-                raise RuntimeError(msg) from e
-            parsed = json.loads(json_sub)
-            if not isinstance(parsed, dict):
-                msg = "Salvaged JSON is not an object."
-                raise TypeError(msg) from e
+            continue
+
+        logger.debug(f"LLM suggested remapping: {parsed}")
 
         # Validate and merge, but ensure keys cover the batch
         for k in batch:
             if k not in parsed:
-                logger.info(
+                logger.warning(
                     f"[LLM] Warning: mapping for '{k}' missing in LLM response; "
                     f"skipping that name."
                 )
@@ -349,7 +339,8 @@ def ask_llm_for_mapping(names: list[str], batch_size: int = 200) -> dict[str, st
     return mapping
 
 
-def extract_json_substring(s: str) -> str | None:
+@beartype
+def extract_json_substring(s: str) -> dict[str, Any] | None:
     """Try to find first { ... } JSON object in string s.
 
     Very naive but sometimes useful when LLM adds commentary around JSON.
@@ -357,16 +348,19 @@ def extract_json_substring(s: str) -> str | None:
     start = s.find("{")
     if start == -1:
         return None
-    # Find matching brace (naive counting).
-    level = 0
-    for i in range(start, len(s)):
-        ch = s[i]
-        if ch == "{":
-            level += 1
-        elif ch == "}":
-            level -= 1
-            if level == 0:
-                return s[start : i + 1]
+
+    # Find matching brace.
+    end = s.find("}", start)
+    if end == -1:
+        return None
+
+    while end != -1:
+        try:
+            candidate = s[start : end + 1]
+            return orjson.loads(candidate)
+        except orjson.JSONDecodeError:
+            end = s.find("}", end + 1)
+
     return None
 
 
@@ -383,7 +377,7 @@ def safe_identifier_regex(name: str) -> str:
     Verilog identifiers may contain letters, digits, _, $.
     We'll use lookaround to ensure the name isn't wrapped by identifier characters.
     """
-    # Escape regex-special chars in name
+    # Escape regex-special chars in name.
     esc = re.escape(name)
     return rf"(?<![A-Za-z0-9_\$]){esc}(?![A-Za-z0-9_\$])"
 
@@ -393,24 +387,19 @@ def apply_mapping_two_step(masked_text: str, mapping: dict[str, str]) -> str:
 
     Returns transformed masked_text.
     """
-    # Step 1: old -> uuid
-    uuid_map: dict[str, str] = {}
+    mapping_three_steps: list[tuple[str, str, str]] = [  # old, uuid, new
+        (old, "MASK_UUID_" + uuid.uuid4().hex, new) for old, new in mapping.items()
+    ]
+
+    # Step 1: old -> uuid.
     text = masked_text
-    # sort by length descending to reduce partial-match interference
-    for old in sorted(mapping.keys(), key=len, reverse=True):
-        pat = re.compile(safe_identifier_regex(old))
-        if not pat.search(text):
-            # skip if doesn't exist in text
-            continue
-        uid = "__UUID_" + uuid.uuid4().hex + "__"
-        text, nsub = pat.subn(uid, text)
-        if nsub > 0:
-            uuid_map[uid] = mapping[old]
-    # Step 2: uuid -> new name (new names should be safe Verilog ids; if not, we still
-    # inject them).
-    # Replace all UUID tokens with their corresponding mapping
-    for uid, new_name in uuid_map.items():
-        text = text.replace(uid, new_name)
+    for old_signal_name, mapped_uuid, _new_signal_name in mapping_three_steps:
+        text = re.sub(r"\b" + re.escape(old_signal_name) + r"\b", mapped_uuid, text)
+
+    # Step 2: uuid -> new name.
+    for _old_signal_name, mapped_uuid, new_signal_name in mapping_three_steps:
+        text = re.sub(r"\b" + re.escape(mapped_uuid) + r"\b", new_signal_name, text)
+
     return text
 
 
@@ -419,66 +408,67 @@ def apply_mapping_two_step(masked_text: str, mapping: dict[str, str]) -> str:
 # ---------------------------
 
 
-def obfuscate_verilog_file(
-    in_path: Path, out_path: Path | None, batch_size: int = 200
-) -> Path:
-    """Obfuscate a verilog file (main entry point).
+def obfuscate_verilog(in_verilog: str, batch_size: int = 200) -> str:
+    """Obfuscate a verilog file/str (main entry point)."""
+    masked_text, placeholders = mask_comments_and_strings(in_verilog)
+    logger.info("Comments and strings masked.")
 
-    Returns path to obfuscated file.
-    """
-    if not in_path.exists():
-        raise FileNotFoundError(in_path)
+    # Extract candidates.
+    candidate_decl = extract_from_declarations(masked_text)
+    candidate_ports = extract_from_module_ports(masked_text)
+    candidate_lhs = extract_extra_by_lhs(masked_text)
 
-    original_text = in_path.read_text(encoding="utf-8")
-    # Backup
-    backup = in_path.with_suffix(in_path.suffix + ".bak.v")
-    backup.write_text(original_text, encoding="utf-8")
-    logger.info(f"[INFO] Backup written to {backup}")
-
-    masked_text, placeholders = mask_comments_and_strings(original_text)
-    logger.info("[INFO] Comments and strings masked.")
-
-    # extract candidates
-    cand_decl = extract_from_declarations(masked_text)
-    cand_ports = extract_from_module_ports(masked_text)
-    cand_lhs = extract_extra_by_lhs(masked_text)
-
-    raw_candidates = cand_decl.union(cand_ports).union(cand_lhs)
+    raw_candidates = candidate_decl.union(candidate_ports).union(candidate_lhs)
     candidates = filter_candidates(raw_candidates)
 
     logger.info(
-        f"[INFO] Found {len(candidates)} candidate names (unique). "
+        f"Found {len(candidates)} candidate names (unique). "
         f"Example few: {list(candidates)[:10]}"
     )
 
     if not candidates:
-        logger.info("[WARN] No candidate names found. Exiting.")
-        return in_path
+        logger.warning("No candidate names found. Returning original.")
+        return in_verilog
 
     # Query LLM for mapping old->new names
     names_list = sorted(candidates)
     mapping = ask_llm_for_mapping(names_list, batch_size=batch_size)
 
     if not mapping:
-        logger.info("[WARN] LLM returned no mapping. Exiting.")
-        return in_path
+        logger.warning("LLM returned no mapping. Returning original.")
+        return in_verilog
 
-    # final mapping might not cover all candidates; filter to those present
+    # Final mapping might not cover all candidates; filter to those present.
     mapping = {k: v for k, v in mapping.items() if k in candidates}
-    logger.info(f"[INFO] Mappings obtained for {len(mapping)} names.")
+    logger.info(f"Mappings obtained for {len(mapping)} names.")
 
     # Apply mapping (two-step)
     transformed_masked_text = apply_mapping_two_step(masked_text, mapping)
-    logger.info("[INFO] Applied name replacements (old->uuid->new).")
+    logger.info("Applied name replacements (old->uuid->new).")
 
-    # Unmask comments/strings
+    # Unmask comments/strings.
     final_text = unmask_placeholders(transformed_masked_text, placeholders)
 
+    logger.info("Restored comments and strings.")
+    return final_text
+
+
+def obfuscate_verilog_file(
+    in_path: Path, out_path: Path | None, batch_size: int = 200
+) -> Path:
+    """Obfuscate a verilog file given by in_path, write to out_path or <in>.obf.v."""
+    if not in_path.is_file():
+        msg = f"Input path {in_path} is not a file."
+        raise FileNotFoundError(msg)
+
+    in_verilog = in_path.read_text(encoding="utf-8")
+    final_text = obfuscate_verilog(in_verilog, batch_size=batch_size)
+
     if not out_path:
-        out_path = in_path.with_suffix(in_path.suffix + ".obf.v")
+        out_path = in_path.with_suffix(".obf" + in_path.suffix)
 
     out_path.write_text(final_text, encoding="utf-8")
-    logger.info(f"[INFO] Obfuscated file written to {out_path}")
+    logger.info(f"Obfuscated file written to {out_path}")
 
     return out_path
 

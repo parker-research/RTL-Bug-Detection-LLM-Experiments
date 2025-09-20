@@ -3,7 +3,10 @@
 from typing import Literal
 
 import openai
+from dotenv import load_dotenv
 from loguru import logger
+
+load_dotenv()
 
 client = openai.OpenAI()
 
