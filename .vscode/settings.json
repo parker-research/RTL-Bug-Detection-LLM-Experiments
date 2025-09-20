@@ -2,5 +2,13 @@
     "[python]": {
         "editor.formatOnSave": true,
         "editor.rulers": [88],
+    },
+    "cSpell.customDictionaries": {
+        "custom-dictionary-workspace": {
+            "name": "custom-dictionary-workspace",
+            "path": "${workspaceFolder:RTL-Bug-Detection-LLM-Experiments}/.cspell/custom-dictionary-workspace.txt",
+            "addWords": true,
+            "scope": "workspace"
+        }
     }
 }
