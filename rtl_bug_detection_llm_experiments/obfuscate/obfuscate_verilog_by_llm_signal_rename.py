@@ -87,7 +87,7 @@ def mask_comments_and_strings(text: str) -> tuple[str, dict[str, str]]:
 
     def make_placeholder(kind: str) -> str:
         nonlocal next_id
-        token = f"__MASK_{kind}_{next_id}__"
+        token = f"__OBFUSCATE_MASK_{kind}_{next_id}__"
         next_id += 1
         return token
 
@@ -151,11 +151,11 @@ def extract_from_declarations(masked_text: str) -> set[str]:
     names: set[str] = set()
     for m in pattern.finditer(masked_text):
         decl_body = m.group(1)
-        # split by commas but respect potential braces/parenthesis (rough split)
+        # Split by commas but respect potential braces/parenthesis (rough split).
         parts = split_comma_separated(decl_body)
         for part in parts:
-            # strip assignments like "a = 1'b0" or dimensions like "arr [0:7]"
-            # take the first identifier-like token in part
+            # Strip assignments like "a = 1'b0" or dimensions like "arr [0:7]".
+            # Take the first identifier-like token in part.
             t = re.search(VERILOG_IDENTIFIER_REGEX, part)
             if t:
                 name = t.group(0)
@@ -203,11 +203,12 @@ def extract_from_module_ports(masked_text: str) -> set[str]:
     )
     for m in module_pattern.finditer(masked_text):
         ports_text = m.group(1)
-        # ports are comma separated; pipe through split_comma_separated
+        # Ports are comma separated; pipe through split_comma_separated.
         for part in split_comma_separated(ports_text):
             t = re.search(VERILOG_IDENTIFIER_REGEX, part)
             if t:
                 names.add(t.group(0))
+
     # Also try module ... ( ... ) followed by newline and body without trailing
     # semicolon (older style).
     module_pattern2 = re.compile(
@@ -220,6 +221,7 @@ def extract_from_module_ports(masked_text: str) -> set[str]:
             t = re.search(VERILOG_IDENTIFIER_REGEX, part)
             if t:
                 names.add(t.group(0))
+
     return names
 
 
@@ -254,20 +256,28 @@ def filter_candidates(raw_names: set[str]) -> set[str]:
     for n in raw_names:
         if not n:
             continue
+
         if n in VERILOG_SYSTEM_IDENTIFIERS:
             continue
+
         if n.lower() in VERILOG_KEYWORDS:
             continue
+
         # Skip numeric-like or single-character nets like 'i' maybe keep 'i'? keep >=2
         # chars or end with underscore/digit?
         if re.fullmatch(r"\d+", n):
             continue
+
         # Skip names that look like an escaped identifier (start with backslash).
         if n.startswith("\\"):
             continue
-        # Optionally skip single character names to reduce noise? we will keep them
-        # (user asked all variable/signal names).
+
+        # Skip the masking placeholders we introduced.
+        if n.startswith("__OBFUSCATE_MASK_"):
+            continue
+
         out.add(n)
+
     return out
 
 
@@ -356,8 +366,8 @@ def extract_json_substring(s: str) -> dict[str, Any] | None:
 
     while end != -1:
         try:
-            candidate = s[start : end + 1]
-            return orjson.loads(candidate)
+            potential_json = s[start : end + 1]
+            return orjson.loads(potential_json)
         except orjson.JSONDecodeError:
             end = s.find("}", end + 1)
 
@@ -388,7 +398,7 @@ def apply_mapping_two_step(masked_text: str, mapping: dict[str, str]) -> str:
     Returns transformed masked_text.
     """
     mapping_three_steps: list[tuple[str, str, str]] = [  # old, uuid, new
-        (old, "MASK_UUID_" + uuid.uuid4().hex, new) for old, new in mapping.items()
+        (old, "TEMP_UUID_" + uuid.uuid4().hex, new) for old, new in mapping.items()
     ]
 
     # Step 1: old -> uuid.
