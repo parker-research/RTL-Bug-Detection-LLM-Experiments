@@ -33,7 +33,7 @@ What this script does:
 6. Replaces old names -> UUID tokens, then UUID tokens -> new names
         (two-step avoids collisions).
 7. Restores masked comments and strings.
-8. Writes `<orig>.obf.v`, and leaves a backup `<orig>.bak.v`.
+8. Writes `<orig>.obf.v`.
 
 Notes & caveats:
 - This is a heuristic approach. It is safer to check the output with a Verilog linter.
@@ -237,7 +237,7 @@ def extract_extra_by_lhs(masked_text: str) -> set[str]:
     )
     for m in m_assign:
         names.add(m.group(1))
-    # simple stmt patterns: identifier = or <=
+    # Simple stmt patterns: identifier = or <=
     m_lhs = re.finditer(
         r"(^|\s)(" + VERILOG_IDENTIFIER_REGEX + r")\s*(?:<=|=)",
         masked_text,
