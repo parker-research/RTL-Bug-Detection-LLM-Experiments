@@ -40,3 +40,27 @@ def test_run_equivalence_different() -> None:
         yosys_command=YOSYS_PATH,
     )
     assert result == 1
+
+
+def test_run_equivalence_internal_signal_rename_1() -> None:
+    """Test running Yosys equivalence check on two sample Verilog files."""
+    result = run_equivalence(
+        input_gold_path=TESTS_DIR_PATH / "test_samples/equivalence_check_1_gate.sv",
+        input_gate_path=(
+            TESTS_DIR_PATH / "test_samples/equivalence_check_1_gate_internal_rename.sv"
+        ),
+        yosys_command=YOSYS_PATH,
+    )
+    assert result == 0
+
+
+def test_run_equivalence_internal_signal_rename_2() -> None:
+    """Test running Yosys equivalence check on two sample Verilog files."""
+    result = run_equivalence(
+        input_gold_path=TESTS_DIR_PATH / "test_samples/equivalence_check_1_gold.sv",
+        input_gate_path=(
+            TESTS_DIR_PATH / "test_samples/equivalence_check_1_gate_internal_rename.sv"
+        ),
+        yosys_command=YOSYS_PATH,
+    )
+    assert result == 0

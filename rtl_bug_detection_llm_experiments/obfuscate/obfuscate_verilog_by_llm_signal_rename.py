@@ -40,11 +40,10 @@ Notes & caveats:
 - The extraction rule is intentionally conservative (focuses on declarations and ports).
 """
 
-import json
 import re
 import sys
+import textwrap
 import uuid
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -136,120 +135,6 @@ def unmask_placeholders(text: str, placeholders: dict[str, str]) -> str:
 # ---------------------------
 
 
-def extract_from_declarations(masked_text: str) -> set[str]:
-    """Heuristically extract identifiers from common declarations.
-
-    This parses comma-separated declarators before a semicolon.
-    """
-    # Example output format: decl_kw = r"(?:wire|reg|logic|input|...|output)"
-    decl_kw = r"(?:" + "|".join(VERILOG_DECLARATION_KEYWORDS) + ")"
-    # Match declarations (rough): keyword [range]? list_of_declarators ;
-    pattern = re.compile(
-        rf"\b{decl_kw}\b\s*(?:\[[^\]]+\]\s*)?([^;]+);",
-        flags=re.IGNORECASE | re.MULTILINE | re.DOTALL,
-    )
-    names: set[str] = set()
-    for m in pattern.finditer(masked_text):
-        decl_body = m.group(1)
-        # Split by commas but respect potential braces/parenthesis (rough split).
-        parts = split_comma_separated(decl_body)
-        for part in parts:
-            # Strip assignments like "a = 1'b0" or dimensions like "arr [0:7]".
-            # Take the first identifier-like token in part.
-            t = re.search(VERILOG_IDENTIFIER_REGEX, part)
-            if t:
-                name = t.group(0)
-                names.add(name)
-    return names
-
-
-def split_comma_separated(s: str) -> list[str]:
-    """Split a string by top-level commas.
-
-    Avoid splitting inside parentheses/brackets/braces).
-    """
-    parts: list[str] = []
-    cur: list[str] = []
-    level = 0
-    for ch in s:
-        if ch in "([{":
-            level += 1
-        elif ch in ")]}" and level > 0:
-            level -= 1
-        if ch == "," and level == 0:
-            parts.append("".join(cur).strip())
-            cur = []
-        else:
-            cur.append(ch)
-    if cur:
-        parts.append("".join(cur).strip())
-    return parts
-
-
-def extract_from_module_ports(masked_text: str) -> set[str]:
-    """Best-effort extraction of identifiers appearing in module port lists.
-
-    ```
-    module foo (input a, output b, c, ... );
-    ```
-
-    We'll parse module ... ( ... ) ; blocks (the header), capturing identifiers inside.
-    """
-    names: set[str] = set()
-    # find module ... ( ... ) optionally with semicolon or newline then body
-    module_pattern = re.compile(
-        r"\bmodule\b\s+" + VERILOG_IDENTIFIER_REGEX + r"\s*\((.*?)\)\s*;",
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    for m in module_pattern.finditer(masked_text):
-        ports_text = m.group(1)
-        # Ports are comma separated; pipe through split_comma_separated.
-        for part in split_comma_separated(ports_text):
-            t = re.search(VERILOG_IDENTIFIER_REGEX, part)
-            if t:
-                names.add(t.group(0))
-
-    # Also try module ... ( ... ) followed by newline and body without trailing
-    # semicolon (older style).
-    module_pattern2 = re.compile(
-        r"\bmodule\b\s+" + VERILOG_IDENTIFIER_REGEX + r"\s*\((.*?)\)\s*",
-        flags=re.IGNORECASE | re.DOTALL,
-    )
-    for m in module_pattern2.finditer(masked_text):
-        ports_text = m.group(1)
-        for part in split_comma_separated(ports_text):
-            t = re.search(VERILOG_IDENTIFIER_REGEX, part)
-            if t:
-                names.add(t.group(0))
-
-    return names
-
-
-def extract_extra_by_lhs(masked_text: str) -> set[str]:
-    """Heuristic: get left-hand identifiers in simple assign expressions.
-
-    'assign <id> = ...' or '<id> <= ...' or '<id> = ...' statements
-
-    This can catch some signals not declared clearly by earlier parsers.
-    """
-    names: set[str] = set()
-    # assign <id> = ...
-    m_assign = re.finditer(
-        r"\bassign\b\s+(" + VERILOG_IDENTIFIER_REGEX + r")\b", masked_text
-    )
-    for m in m_assign:
-        names.add(m.group(1))
-    # Simple stmt patterns: identifier = or <=
-    m_lhs = re.finditer(
-        r"(^|\s)(" + VERILOG_IDENTIFIER_REGEX + r")\s*(?:<=|=)",
-        masked_text,
-        flags=re.MULTILINE,
-    )
-    for m in m_lhs:
-        names.add(m.group(2))
-    return names
-
-
 def filter_candidates(raw_names: set[str]) -> set[str]:
     """Remove keywords, system ids, numeric-looking items, and short false positives."""
     out = set[str]()
@@ -257,15 +142,15 @@ def filter_candidates(raw_names: set[str]) -> set[str]:
         if not n:
             continue
 
-        if n in VERILOG_SYSTEM_IDENTIFIERS:
+        if (
+            (n in VERILOG_SYSTEM_IDENTIFIERS)
+            or (n in VERILOG_DECLARATION_KEYWORDS)
+            or (n in VERILOG_KEYWORDS)
+        ):
             continue
 
-        if n.lower() in VERILOG_KEYWORDS:
-            continue
-
-        # Skip numeric-like or single-character nets like 'i' maybe keep 'i'? keep >=2
-        # chars or end with underscore/digit?
-        if re.fullmatch(r"\d+", n):
+        # Skip numeric-looking names (all digits).
+        if n.isdigit():
             continue
 
         # Skip names that look like an escaped identifier (start with backslash).
@@ -286,67 +171,75 @@ def filter_candidates(raw_names: set[str]) -> set[str]:
 # ---------------------------
 
 
-def chunk_list(lst: list[str], size: int) -> Iterator[list[str]]:
-    """Yield successive chunks of given size from lst."""
-    for i in range(0, len(lst), size):
-        yield lst[i : i + size]
+def build_prompt_for_full_file(masked_verilog: str) -> str:
+    """Ask the LLM to scan the entire (masked) Verilog file and return a JSON mapping.
 
-
-def build_prompt_for_batch(batch: list[str]) -> str:
-    """Construct the text prompt to ask the LLM for a JSON mapping.
-
-    We ask for strict JSON only, nothing else.
+    We pass the masked code so comments/strings aren't considered for renames.
     """
-    names_json = json.dumps(batch, indent=2)
-    prompt = (
-        "You are given a JSON array of Verilog signal names. "
-        "Return a json object mapping each "
-        "old name to a new similar-but-different name. "
-        "The output MUST be valid JSON and contain exactly "
-        "one key for each input name. Do not add any commentary. Example output:\n"
-        '{"old_name":"new_name", "another_old":"another_new"}\n\n'
-        "Constraints for new names:\n"
-        "- Must be valid Verilog identifiers "
-        "(start with letter or underscore, then letters/digits/_/$).\n"
-        "- Do NOT produce names that collide with Verilog keywords or system "
-        "identifiers.\n\n"
-        "Input names:\n"
-        f"{names_json}\n\n"
-        "Return only the JSON mapping object."
-    )
-    return prompt  # noqa: RET504
+    # Keep it explicit and JSON-only to reduce chatter.
+    return textwrap.dedent(f"""
+    You are given a Verilog/SystemVerilog source file (with comments/strings masked).
+    Identify all renamable identifiers (signals, nets, variables, ports, params,
+    localparams, genvars, typedef names, interface names, package-scoped symbols, etc.)
+    that appear in code.
+
+    Produce a single JSON object mapping OLD_NAME -> NEW_NAME.
+
+    STRICT REQUIREMENTS:
+    - Only include identifiers that appear in the provided code (outside masks).
+    - New names must be valid Verilog/SystemVerilog identifiers:
+      start with [A-Za-z_] then [A-Za-z0-9_$]*.
+    - Do NOT use any keyword or system identifier (like $display).
+    - Avoid collisions (no two old names mapped to the same new name).
+    - Preserve case style loosely (e.g., foo_bar -> x1_bar or r42_foo is fine).
+    - Do NOT include the masking tokens that look like __OBFUSCATE_MASK_* in the
+        mapping.
+
+    --- BEGIN CODE ---
+    {masked_verilog}
+    --- END CODE ---
+    """).strip()
 
 
-def ask_llm_for_mapping(names: list[str], batch_size: int = 200) -> dict[str, str]:
-    """Batch names, call prompt_llm for each batch, and aggregate mapping.
+def ask_llm_for_mapping_from_file(masked_text: str) -> dict[str, str]:
+    """Query the LLM once with the entire file. Validate and return a mapping."""
+    prompt = build_prompt_for_full_file(masked_text)
+    logger.info("[LLM] Requesting full-file rename mapping...")
+    resp = prompt_llm(prompt)
 
-    Expects the LLM to return pure JSON text.
-    """
-    mapping: dict[str, str] = {}
-    for batch in chunk_list(names, batch_size):
-        prompt = build_prompt_for_batch(batch)
-        logger.info(f"[LLM] Requesting mapping for batch of {len(batch)} names...")
-        resp = prompt_llm(prompt)
+    parsed = extract_json_substring(resp)
+    if parsed is None:
+        logger.error("[LLM] Could not parse JSON mapping from response.")
+        return {}
 
-        parsed = extract_json_substring(resp)
-        if parsed is None:
-            logger.error(
-                f"[LLM] Error: could not parse JSON from LLM response:\n{resp}"
+    # Filter out anything that isn't a simple string->string mapping,
+    # and ensure the old key exists in masked_text as a standalone identifier.
+    clean: dict[str, str] = {}
+    for old, new in parsed.items():
+        if old.startswith("__OBFUSCATE_MASK_"):
+            continue
+        # Must appear as a standalone identifier in the masked text.
+        if re.search(safe_identifier_regex(old), masked_text) is None:
+            continue
+        # Basic validity of new name.
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_\$]*", new):
+            continue
+        clean[old] = new
+
+    # De-dup target names: if collisions, drop later ones to be safe.
+    seen_new: set[str] = set()
+    final_map: dict[str, str] = {}
+    for old, new in clean.items():
+        if new in seen_new:
+            logger.warning(
+                f"[LLM] Collision on new name '{new}' for old '{old}' — skipping."
             )
             continue
+        seen_new.add(new)
+        final_map[old] = new
 
-        logger.debug(f"LLM suggested remapping: {parsed}")
-
-        # Validate and merge, but ensure keys cover the batch
-        for k in batch:
-            if k not in parsed:
-                logger.warning(
-                    f"[LLM] Warning: mapping for '{k}' missing in LLM response; "
-                    f"skipping that name."
-                )
-            else:
-                mapping[k] = parsed[k]
-    return mapping
+    logger.info(f"[LLM] Accepted {len(final_map)} rename pairs.")
+    return final_map
 
 
 @beartype
@@ -386,10 +279,12 @@ def safe_identifier_regex(name: str) -> str:
 
     Verilog identifiers may contain letters, digits, _, $.
     We'll use lookaround to ensure the name isn't wrapped by identifier characters.
+
+    Similar goal as word boundary and re.escape(), but adapted for Verilog identifiers.
     """
     # Escape regex-special chars in name.
     esc = re.escape(name)
-    return rf"(?<![A-Za-z0-9_\$]){esc}(?![A-Za-z0-9_\$])"
+    return r"(?<![A-Za-z0-9_\$])" + esc + r"(?![A-Za-z0-9_\$])"
 
 
 def apply_mapping_two_step(masked_text: str, mapping: dict[str, str]) -> str:
@@ -404,11 +299,15 @@ def apply_mapping_two_step(masked_text: str, mapping: dict[str, str]) -> str:
     # Step 1: old -> uuid.
     text = masked_text
     for old_signal_name, mapped_uuid, _new_signal_name in mapping_three_steps:
-        text = re.sub(r"\b" + re.escape(old_signal_name) + r"\b", mapped_uuid, text)
+        text = re.sub(
+            safe_identifier_regex(old_signal_name),
+            mapped_uuid,
+            text,
+        )
 
     # Step 2: uuid -> new name.
     for _old_signal_name, mapped_uuid, new_signal_name in mapping_three_steps:
-        text = re.sub(r"\b" + re.escape(mapped_uuid) + r"\b", new_signal_name, text)
+        text = text.replace(mapped_uuid, new_signal_name)
 
     return text
 
@@ -418,61 +317,42 @@ def apply_mapping_two_step(masked_text: str, mapping: dict[str, str]) -> str:
 # ---------------------------
 
 
-def obfuscate_verilog(in_verilog: str, batch_size: int = 200) -> str:
-    """Obfuscate a verilog file/str (main entry point)."""
-    masked_text, placeholders = mask_comments_and_strings(in_verilog)
-    logger.info("Comments and strings masked.")
-
-    # Extract candidates.
-    candidate_decl = extract_from_declarations(masked_text)
-    candidate_ports = extract_from_module_ports(masked_text)
-    candidate_lhs = extract_extra_by_lhs(masked_text)
-
-    raw_candidates = candidate_decl.union(candidate_ports).union(candidate_lhs)
-    candidates = filter_candidates(raw_candidates)
-
-    logger.info(
-        f"Found {len(candidates)} candidate names (unique). "
-        f"Example few: {list(candidates)[:10]}"
-    )
-
-    if not candidates:
-        logger.warning("No candidate names found. Returning original.")
-        return in_verilog
-
-    # Query LLM for mapping old->new names
-    names_list = sorted(candidates)
-    mapping = ask_llm_for_mapping(names_list, batch_size=batch_size)
+def obfuscate_verilog(in_verilog: str) -> str:  # batch_size kept for API compat
+    """Obfuscate a Verilog file by asking the LLM for a full-file rename map."""
+    # Ask LLM to scan the whole (masked) file and return a JSON mapping.
+    mapping = ask_llm_for_mapping_from_file(in_verilog)
 
     if not mapping:
-        logger.warning("LLM returned no mapping. Returning original.")
+        logger.warning("LLM returned no usable mapping. Returning original.")
         return in_verilog
+    logger.debug(f"LLM mapping ({len(mapping)} remaps): {mapping}")
 
-    # Final mapping might not cover all candidates; filter to those present.
-    mapping = {k: v for k, v in mapping.items() if k in candidates}
-    logger.info(f"Mappings obtained for {len(mapping)} names.")
+    # Filter mapping keys to ensure they are valid candidates.
+    valid_mapping_keys = filter_candidates(set(mapping.keys()))
+    invalid_mapping_keys = valid_mapping_keys - set(mapping.keys())
+    mapping = {k: v for k, v in mapping.items() if k in valid_mapping_keys}
+    if invalid_mapping_keys:
+        logger.debug(f"Filtered mapping to {len(mapping)} valid remaps: {mapping}")
+        logger.debug(
+            f"Dropped {len(invalid_mapping_keys)} invalid keys: "
+            f"{sorted(invalid_mapping_keys)}"
+        )
 
-    # Apply mapping (two-step)
-    transformed_masked_text = apply_mapping_two_step(masked_text, mapping)
-    logger.info("Applied name replacements (old->uuid->new).")
+    # Apply mapping of names.
+    final_text = apply_mapping_two_step(in_verilog, mapping)
+    logger.debug("Applied name replacements (old->uuid->new).")
 
-    # Unmask comments/strings.
-    final_text = unmask_placeholders(transformed_masked_text, placeholders)
-
-    logger.info("Restored comments and strings.")
     return final_text
 
 
-def obfuscate_verilog_file(
-    in_path: Path, out_path: Path | None, batch_size: int = 200
-) -> Path:
+def obfuscate_verilog_file(in_path: Path, out_path: Path | None) -> Path:
     """Obfuscate a verilog file given by in_path, write to out_path or <in>.obf.v."""
     if not in_path.is_file():
         msg = f"Input path {in_path} is not a file."
         raise FileNotFoundError(msg)
 
     in_verilog = in_path.read_text(encoding="utf-8")
-    final_text = obfuscate_verilog(in_verilog, batch_size=batch_size)
+    final_text = obfuscate_verilog(in_verilog)
 
     if not out_path:
         out_path = in_path.with_suffix(".obf" + in_path.suffix)
