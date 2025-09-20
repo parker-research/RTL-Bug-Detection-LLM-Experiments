@@ -14,7 +14,6 @@ Examples:
 
 """
 
-import argparse
 import shlex
 import shutil
 import subprocess
@@ -22,6 +21,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+import typed_argparse as tap
 from loguru import logger
 
 
@@ -31,14 +31,14 @@ def infer_is_system_verilog(path: str | Path) -> bool:
 
 
 def yosys_read_cmd(
-    file: str | Path, include_dirs: list[str], defines: list[str], *, use_sv: bool
+    file: str | Path, include_dirs: list[Path], defines: list[str], *, use_sv: bool
 ) -> str:
     """Build yosys read_verilog command with options."""
     opts: list[str] = []
     if use_sv:
         opts.append("-sv")
     for inc in include_dirs:
-        opts += ["-I", inc]
+        opts += ["-I", inc.resolve().as_posix()]
     for d in defines:
         opts += ["-D", d]
     return "read_verilog {} {}".format(
@@ -50,7 +50,7 @@ def yosys_read_cmd(
 def build_yosys_script(  # noqa: PLR0913
     gold_file: str | Path,
     gate_file: str | Path,
-    include_dirs: list[str],
+    include_dirs: list[Path],
     defines: list[str],
     *,
     use_sv: bool,
@@ -99,88 +99,68 @@ def build_yosys_script(  # noqa: PLR0913
     return "\n".join(lines) + "\n"
 
 
-def main() -> None:
-    """Run CLI wrapper for isolated (System)Verilog equivalence via Yosys."""
-    ap = argparse.ArgumentParser(
-        description="Isolated (System)Verilog equivalence via Yosys (no top needed)."
-    )
-    ap.add_argument("gold", help="Reference file (gold)")
-    ap.add_argument("gate", help="Candidate file (gate)")
-    ap.add_argument(
-        "-I",
-        dest="include_dirs",
-        action="append",
-        default=[],
-        help="Add include directory (repeatable)",
-    )
-    ap.add_argument(
-        "-D",
-        dest="defines",
-        action="append",
-        default=[],
-        help="Preprocessor define NAME or NAME=VAL (repeatable)",
-    )
-    ap.add_argument("--sv", action="store_true", help="Force SystemVerilog parsing")
-    ap.add_argument("--yosys", default="yosys", help="Path to yosys binary")
-    ap.add_argument(
-        "--abc9",
-        action="store_true",
-        help="Run abc9 -dff after prep (can help some proofs)",
-    )
-    ap.add_argument(
-        "--extra-pass",
-        action="append",
-        default=[],
-        help="Extra Yosys pass after prep (e.g., 'opt -fast')",
-    )
-    ap.add_argument(
-        "--keep-temp", action="store_true", help="Keep generated .ys and .log in CWD"
-    )
-    ap.add_argument(
-        "--show-yosys-cmd", action="store_true", help="logger.info exact Yosys command"
-    )
-    args = ap.parse_args()
+def run_equivalence(  # noqa: PLR0913
+    input_gold_path: Path,
+    input_gate_path: Path,
+    include_dirs: list[Path] | None = None,
+    defines: list[str] | None = None,
+    *,
+    force_sv: bool = False,
+    yosys_command: str = "yosys",
+    abc9: bool = False,
+    extra_pass: list[str] | None = None,
+    keep_temp: bool = False,
+) -> int:
+    """Run isolated (System)Verilog equivalence via Yosys.
 
-    arg_gold = Path(args.gold)
-    arg_gate = Path(args.gate)
+    Returns:
+        int: Process exit code
+            (0 = equivalent, 1 = not equivalent/proof failed, 2 = usage error).
+
+    """
+    include_dirs = include_dirs or []
+    defines = defines or []
+    extra_pass = extra_pass or []
 
     # Validate inputs
-    for f in (arg_gold, arg_gate):
+    for f in (input_gold_path, input_gate_path):
         if not f.exists():
-            logger.info(f"ERROR: File not found: {f}", file=sys.stderr)
-            sys.exit(2)
+            logger.error(f"File not found: {f}")
+            return 2
 
-    yosys_bin = shutil.which(args.yosys) if args.yosys == "yosys" else args.yosys
+    yosys_bin = (
+        shutil.which(yosys_command) if yosys_command == "yosys" else yosys_command
+    )
     if not yosys_bin or not Path(yosys_bin).exists():
-        logger.info(f"ERROR: Yosys not found at '{args.yosys}'.", file=sys.stderr)
-        sys.exit(2)
+        logger.error(f"Yosys not found at '{yosys_command}'.")
+        return 2
 
     use_sv = (
-        args.sv
-        or infer_is_system_verilog(arg_gold)
-        or infer_is_system_verilog(arg_gate)
+        force_sv
+        or infer_is_system_verilog(input_gold_path)
+        or infer_is_system_verilog(input_gate_path)
     )
 
-    with tempfile.TemporaryDirectory(delete=bool(not args.keep_temp)) as temp_dir_str:
+    with tempfile.TemporaryDirectory(delete=not keep_temp) as temp_dir_str:
         temp_dir = Path(temp_dir_str)
 
         ys_script = build_yosys_script(
-            gold_file=arg_gold,
-            gate_file=arg_gate,
-            include_dirs=args.include_dirs,
-            defines=args.defines,
+            gold_file=input_gold_path,
+            gate_file=input_gate_path,
+            include_dirs=include_dirs,
+            defines=defines,
             use_sv=use_sv,
-            extra_passes=list(args.extra_pass),
-            use_abc9=args.abc9,
+            extra_passes=list(extra_pass),
+            use_abc9=abc9,
         )
-        ys_path = temp_dir / "equiv_isolated.ys"
-        log_path = temp_dir / "yosys.log"
-        ys_path.write_text(ys_script, encoding="utf-8")
+        ys_script_path = temp_dir / "equiv_isolated.ys"
+        yosys_log_path = temp_dir / "yosys.log"
+        ys_script_path.write_text(ys_script, encoding="utf-8")
 
-        cmd = [yosys_bin, "-q", "-s", str(ys_path)]
-        if args.show_yosys_cmd:
-            logger.info("Yosys command:", " ".join(shlex.quote(c) for c in cmd))
-        with log_path.open("w", encoding="utf-8") as yosys_log_out_fp:
+        cmd: list[str] = [str(yosys_bin), "-q", "-s", str(ys_script_path)]
+        logger.debug("Yosys command: " + " ".join(shlex.quote(c) for c in cmd))
+
+        with yosys_log_path.open("w", encoding="utf-8") as yosys_log_out_fp:
             proc = subprocess.run(  # noqa: S603
                 cmd,
                 check=False,
@@ -188,21 +168,83 @@ def main() -> None:
                 stderr=subprocess.STDOUT,
             )
 
-        if args.keep_temp:
-            logger.debug(f"Yosys script: {ys_path}")
-            logger.debug(f"Yosys log: {log_path}")
+        if keep_temp:
+            logger.debug(f"Yosys script: {ys_script_path}")
+            logger.debug(f"Yosys log:    {yosys_log_path}")
 
         if proc.returncode == 0:
             logger.info("✅ Equivalent (equiv_status -assert passed)")
-            logger.info(f"Yosys log: {log_path}")
-            sys.exit(0)
-        else:
-            logger.info("❌ Not equivalent OR proof failed.")
-            logger.info(
-                "Tip: try --abc9 or --extra-pass 'opt -fast' for tougher cones."
-            )
-            sys.exit(1)
+            logger.info(f"Yosys log: {yosys_log_path}")
+            return 0
+
+        logger.info("❌ Not equivalent OR proof failed.")
+        logger.info("Tip: try --abc9 or --extra-pass 'opt -fast' for tougher cones.")
+        return 1
+
+
+# 1. Argument definition
+class Args(tap.TypedArgs):
+    """Command-line arguments for yosys_equivalence_check.py."""
+
+    gold: Path = tap.arg(help="Reference file (gold)", positional=True)
+    gate: Path = tap.arg(help="Candidate file (gate)", positional=True)
+
+    include_dirs: list[Path] = tap.arg(
+        "-I",
+        default=[],
+        help="Add include directory (repeatable)",
+    )
+    defines: list[str] = tap.arg(
+        "-D",
+        default=[],
+        help="Preprocessor define NAME or NAME=VAL (repeatable)",
+    )
+    sv: bool = tap.arg(
+        "--sv",
+        help="Force SystemVerilog parsing",
+    )
+    yosys: str = tap.arg(
+        "--yosys",
+        default="yosys",
+        help="Path to yosys binary",
+    )
+    abc9: bool = tap.arg(
+        "--abc9",
+        help="Run abc9 -dff after prep (can help some proofs)",
+    )
+    extra_pass: list[str] = tap.arg(
+        "--extra-pass",
+        default=[],
+        help="Extra Yosys pass after prep (e.g., 'opt -fast')",
+    )
+    keep_temp: bool = tap.arg(
+        "--keep-temp",
+        help="Keep generated .ys and .log in CWD",
+    )
+
+
+# 2. Business logic
+def runner(args: Args) -> None:
+    """Run equivalence check with parsed args."""
+    return_code = run_equivalence(
+        input_gold_path=(args.gold),
+        input_gate_path=(args.gate),
+        include_dirs=args.include_dirs,
+        defines=args.defines,
+        force_sv=args.sv,
+        yosys_command=args.yosys,
+        abc9=args.abc9,
+        extra_pass=args.extra_pass,
+        keep_temp=args.keep_temp,
+    )
+    sys.exit(return_code)
+
+
+# 3. Bind + run
+def main_cli() -> None:
+    """Run CLI entry point."""
+    tap.Parser(Args).bind(runner).run()
 
 
 if __name__ == "__main__":
-    main()
+    main_cli()
