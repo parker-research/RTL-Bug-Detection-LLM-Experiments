@@ -297,7 +297,7 @@ def main() -> None:
     """Run the normalization for both hackatdac19 and hackatdac21."""
     repo_root = get_repo_root_path()
 
-    out_root = (repo_root / "out").resolve()
+    out_root = (repo_root / "out" / "normalize_hack_the_silicon").resolve()
 
     df1 = process_one_repository(
         repo_name="hackatdac19",
