@@ -61,6 +61,18 @@ wheels = [
 ]
 
 [[package]]
+name = "fire"
+version = "0.7.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "termcolor" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c0/00/f8d10588d2019d6d6452653def1ee807353b21983db48550318424b5ff18/fire-0.7.1.tar.gz", hash = "sha256:3b208f05c736de98fb343310d090dcc4d8c78b2a89ea4f32b837c586270a9cbf", size = 88720, upload-time = "2025-08-16T20:20:24.175Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e5/4c/93d0f85318da65923e4b91c1c2ff03d8a458cbefebe3bc612a6693c7906d/fire-0.7.1-py3-none-any.whl", hash = "sha256:e43fd8a5033a9001e7e2973bab96070694b9f12f2e0ecf96d4683971b5ab1882", size = 115945, upload-time = "2025-08-16T20:20:22.87Z" },
+]
+
+[[package]]
 name = "gitdb"
 version = "4.0.12"
 source = { registry = "https://pypi.org/simple" }
@@ -378,6 +390,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "beartype" },
+    { name = "fire" },
     { name = "gitpython" },
     { name = "loguru" },
     { name = "openai" },
@@ -385,6 +398,7 @@ dependencies = [
     { name = "polars" },
     { name = "python-dotenv" },
     { name = "typed-argparse" },
+    { name = "uuid-extension" },
 ]
 
 [package.dev-dependencies]
@@ -397,6 +411,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "beartype", specifier = ">=0.21.0" },
+    { name = "fire", specifier = ">=0.7.1" },
     { name = "gitpython", specifier = ">=3.1.45" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "openai", specifier = ">=1.99.7" },
@@ -404,6 +419,7 @@ requires-dist = [
     { name = "polars", specifier = ">=1.32.2" },
     { name = "python-dotenv", specifier = ">=1.1.1" },
     { name = "typed-argparse", specifier = ">=0.3.1" },
+    { name = "uuid-extension" },
 ]
 
 [package.metadata.requires-dev]
@@ -457,6 +473,15 @@ wheels = [
 ]
 
 [[package]]
+name = "termcolor"
+version = "3.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ca/6c/3d75c196ac07ac8749600b60b03f4f6094d54e132c4d94ebac6ee0e0add0/termcolor-3.1.0.tar.gz", hash = "sha256:6a6dd7fbee581909eeec6a756cff1d7f7c376063b14e4a298dc4980309e55970", size = 14324, upload-time = "2025-04-30T11:37:53.791Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4f/bd/de8d508070629b6d84a30d01d57e4a65c69aa7f5abe7560b8fad3b50ea59/termcolor-3.1.0-py3-none-any.whl", hash = "sha256:591dd26b5c2ce03b9e43f391264626557873ce1d379019786f99b0c2bee140aa", size = 7684, upload-time = "2025-04-30T11:37:52.382Z" },
+]
+
+[[package]]
 name = "tqdm"
 version = "4.67.1"
 source = { registry = "https://pypi.org/simple" }
@@ -499,6 +524,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/f8/b1/0c11f5058406b3af7609f121aaa6b609744687f1d158b3c3a5bf4cc94238/typing_inspection-0.4.1.tar.gz", hash = "sha256:6ae134cc0203c33377d43188d4064e9b357dba58cff3185f22924610e70a9d28", size = 75726, upload-time = "2025-05-21T18:55:23.885Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/17/69/cd203477f944c353c31bade965f880aa1061fd6bf05ded0726ca845b6ff7/typing_inspection-0.4.1-py3-none-any.whl", hash = "sha256:389055682238f53b04f7badcb49b989835495a96700ced5dab2d8feae4b26f51", size = 14552, upload-time = "2025-05-21T18:55:22.152Z" },
+]
+
+[[package]]
+name = "uuid-extension"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/05/4e/55636e6655feae1e843e5db0255edb42497e1fb865529860a916e82286d9/uuid_extension-0.2.0.tar.gz", hash = "sha256:e68907184276f47a4b169dc9891477693371b5f3756aebdaffb7cf83b9a6077e", size = 54458, upload-time = "2025-07-21T05:51:13.782Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/43/82/006fbeb46fc6856ea813c4a09264c2fd60dc86e6c19b218b31b17766cba9/uuid_extension-0.2.0-py3-none-any.whl", hash = "sha256:8dac0d934afd07a16ae8537dd873bc833f1fcc31530295029d86c9cea49bf6a3", size = 5660, upload-time = "2025-07-21T05:51:12.095Z" },
 ]
 
 [[package]]

@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "beartype>=0.21.0",
+    "fire>=0.7.1",
     "gitpython>=3.1.45",
     "loguru>=0.7.3",
     "openai>=1.99.7",
@@ -13,6 +14,7 @@ dependencies = [
     "polars>=1.32.2",
     "python-dotenv>=1.1.1",
     "typed-argparse>=0.3.1",
+    "uuid-extension",
 ]
 
 [dependency-groups]
