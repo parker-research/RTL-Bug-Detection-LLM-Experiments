@@ -45,7 +45,7 @@ def analyze_response(input_table_data_path: Path | str) -> None:
         actual_detection_result=(
             pl.when(pl.col("llm_response").str.contains("No modifications detected"))
             .then(pl.lit("no_bug"))
-            .when(pl.col("llm_response").str.len_chars() < pl.lit(50))
+            .when(pl.col("llm_response").str.len_chars() < pl.lit(20))
             .then(pl.lit("response_very_short"))
             .when(pl.col("llm_response").str.contains("```", literal=True).not_())
             .then(pl.lit("response_contains_no_code_block"))
