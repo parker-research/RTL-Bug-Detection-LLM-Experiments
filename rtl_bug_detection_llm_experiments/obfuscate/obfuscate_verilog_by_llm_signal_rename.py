@@ -44,12 +44,14 @@ import re
 import sys
 import textwrap
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
 import orjson
 from beartype import beartype
 from loguru import logger
+from tqdm import tqdm
 
 from rtl_bug_detection_llm_experiments.llm import prompt_llm
 from rtl_bug_detection_llm_experiments.verilog_spec import (
@@ -368,6 +370,46 @@ def obfuscate_verilog_file(in_path: Path, out_path: Path | None) -> Path:
 # ---------------------------
 
 
+def obfuscate_all_files_cursively_in_place(input_dir: Path) -> None:
+    """Obfuscate all .v/.sv files in the given directory and its subdirectories."""
+    if not input_dir.is_dir():
+        msg = f"Input path {input_dir} is not a directory."
+        raise NotADirectoryError(msg)
+
+    # Gather files (sorted for deterministic ordering).
+    files = sorted(list(input_dir.rglob("*.v")) + list(input_dir.rglob("*.sv")))
+    files = [p for p in files if p.is_file()]
+
+    total = len(files)
+    if total == 0:
+        logger.info(f"No .v/.sv files found in {input_dir}.")
+        return
+
+    success_count = 0
+
+    def _worker(path: Path) -> Path:
+        # call the existing obfuscation function (in-place)
+        obfuscate_verilog_file(in_path=path, out_path=path)
+        return path
+
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        future_to_path = {executor.submit(_worker, p): p for p in files}
+
+        # Use tqdm to show progress as futures complete
+        with tqdm(total=total, desc="Obfuscating", unit="file") as pbar:
+            for fut in as_completed(future_to_path):
+                path = future_to_path[fut]
+                try:
+                    fut.result()  # Will re-raise exception if worker failed.
+                    success_count += 1
+                except Exception as exc:
+                    logger.error(f"Error processing {path}: {exc}")
+                finally:
+                    pbar.update(1)
+
+    logger.info(f"Obfuscated {success_count} / {total} files in directory {input_dir}.")
+
+
 def main() -> None:
     """Command-line interface."""
     if len(sys.argv) < 2:  # noqa: PLR2004
@@ -375,13 +417,11 @@ def main() -> None:
         sys.exit(1)
     p = Path(sys.argv[1])
 
-    # TODO(Parker): If provided module path is directory, optionally process all files.
-    # For now single file only.
-    try:
+    if p.is_file():
         obfuscate_verilog_file(in_path=p, out_path=None)
-    except Exception as e:
-        logger.info("[ERROR]", e)
-        raise
+    elif p.is_dir():
+        logger.info(f"Obfuscating all .v/.sv files in directory {p}...")
+        obfuscate_all_files_cursively_in_place(input_dir=p)
 
 
 if __name__ == "__main__":
