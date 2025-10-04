@@ -14,7 +14,7 @@ client = openai.OpenAI()
 def prompt_llm(
     prompt: str,
     *,
-    model: Literal["gpt-4o"] = "gpt-4o",
+    model: Literal["gpt-4o", "gpt-5", "gpt-5-mini", "gpt-5-nano"] = "gpt-4o",
     temperature: float | None = None,
 ) -> str:
     """Prompt GPT with a basic string and return the result.
@@ -36,7 +36,7 @@ def prompt_llm(
     )
 
     logger.debug(
-        f"Prompted LLM (prompt={len(prompt):} bytes, "
+        f"Prompted {model} LLM (prompt={len(prompt):} bytes, "
         f"response={len(response.output_text):} bytes)."
     )
 
