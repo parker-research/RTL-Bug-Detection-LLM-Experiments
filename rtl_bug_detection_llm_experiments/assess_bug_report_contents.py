@@ -192,3 +192,54 @@ def extract_markdown_code_blocks(markdown: str) -> list[str]:
             current_block.append(line)
 
     return code_blocks
+
+
+def assess_bug_report_contents_score(
+    base_code: str, buggy_code: str, bug_report: str, similarity_threshold: float = 0.8
+) -> float:
+    """Assess if the bug report contains the modified code.
+
+    Args:
+        base_code: The original code before the bug was introduced.
+        buggy_code: The modified code with the bug.
+        bug_report: The content of the bug report.
+        similarity_threshold: Minimum similarity ratio (0-1) to consider a match.
+                            Default is 0.8 (80% similar).
+
+    Returns:
+        Score between 0 and 1 indicating likelihood the bug report addresses the bug.
+        1 means the bug report contains all modified code, 0 means none of it.
+
+    """
+    diffs = get_str_diff_chunks(base_code, buggy_code)
+    assert len(diffs) > 0, "No diffs found between base and buggy code."
+
+    code_blocks = extract_markdown_code_blocks(bug_report)
+    assert len(code_blocks) > 0, "No code blocks found in bug report."
+
+    score_per_diff = 1.0 / len(diffs)
+    total_score = 0.0
+
+    for diff in diffs:
+        diff_new_norm = _normalize_whitespace(
+            diff.new_version,  # Buggy code part.
+        )
+
+        # Find the best similarity match across all code blocks.
+        best_similarity = 0.0
+        for block in code_blocks:
+            block_norm = _normalize_whitespace(block)
+            similarity = difflib.SequenceMatcher(
+                None, diff_new_norm, block_norm
+            ).ratio()
+            best_similarity = max(best_similarity, similarity)
+
+        # Award score based on similarity (full or partial credit).
+        if best_similarity >= similarity_threshold:
+            # Full credit if above threshold.
+            total_score += score_per_diff
+        else:
+            # Partial credit proportional to similarity.
+            total_score += score_per_diff * (best_similarity / similarity_threshold)
+
+    return min(total_score, 1.0)  # Cap at 1.0 due to partial credits.
