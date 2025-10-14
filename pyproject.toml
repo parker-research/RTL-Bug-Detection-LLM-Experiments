@@ -42,7 +42,8 @@ ignore = [
     "COM812",
     "PLR0915",
     "TD",
-    "FIX"
+    "FIX",
+    "PLR2004" # Allow magic numbers.
 ]
 
 [tool.ruff.lint.per-file-ignores]
