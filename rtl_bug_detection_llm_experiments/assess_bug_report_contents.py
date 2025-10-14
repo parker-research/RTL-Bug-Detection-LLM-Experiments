@@ -222,7 +222,13 @@ def assess_bug_report_contents_score(
 
     for diff in diffs:
         diff_new_norm = _normalize_whitespace(
-            diff.new_version,  # Buggy code part.
+            # Generally (ideally) use the buggy version (new_version).
+            diff.new_version
+            if diff.new_version
+            # In cases where the bug insertion is due to line removal, then judge it
+            # based on a diff to the base non-buggy version.
+            # Has test case for this branch.
+            else diff.old_version
         )
 
         # Find the best similarity match across all code blocks.

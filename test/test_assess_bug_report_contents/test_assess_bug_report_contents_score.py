@@ -285,3 +285,67 @@ This causes the FIFO to never actually fill properly.
 
     score = assess_bug_report_contents_score(base_code, buggy_code, bug_report)
     assert score >= 0.95, f"Expected high score, got {score}"
+
+
+@pytest.mark.parametrize("include_comment_in_bug_report", [True, False])
+def test_remove_chunk_of_original(*, include_comment_in_bug_report: bool) -> None:
+    """Test that bugs, where a chunk is removed from the original, can be scored.
+
+    This case isn't particularly easy to check that the bug logic is correct.
+    """
+    base_design = """
+// 3:8 Decoder
+// Decodes a 3-bit input into one of 8 output lines.
+// Optional enable input for controlling decoder operation.
+
+module decoder_3to8 (
+    input wire [2:0] in,    // 3-bit input
+    input wire enable,      // Enable signal (active high)
+    output reg [7:0] out    // 8-bit output (one-hot encoded)
+);
+    always @(*) begin
+        if (enable) begin
+            case (in)
+                3'b000: out = 8'b00000001;  // Output 0 active
+                3'b001: out = 8'b00000010;  // Output 1 active
+                3'b010: out = 8'b00000100;  // Output 2 active
+                3'b011: out = 8'b00001000;  // Output 3 active
+                3'b100: out = 8'b00010000;  // Output 4 active
+                3'b101: out = 8'b00100000;  // Output 5 active
+                3'b110: out = 8'b01000000;  // Output 6 active
+                3'b111: out = 8'b10000000;  // Output 7 active
+                default: out = 8'b00000000;
+            endcase
+        end else begin
+            out = 8'b00000000;  // All outputs low when disabled
+        end
+    end
+
+endmodule
+"""
+
+    # Remove the 17th line.
+    assert (
+        base_design.splitlines()[16].strip()
+        == "3'b011: out = 8'b00001000;  // Output 3 active"
+    )
+    buggy_design = "\n".join(
+        base_design.splitlines()[0:16] + base_design.splitlines()[18:]
+    )
+
+    comment_str = "  // Output 3 active" if include_comment_in_bug_report else ""
+    bug_report = f"""
+# Bug Report: Decoder Missing Output Case
+
+The decoder is missing the output case for `3'b011`. This causes the decoder to not
+activate the correct output line.
+
+```verilog
+3'b011: out = 8'b00001000;{comment_str}
+```
+
+This should be included in the decoder's case statement.
+    """
+
+    score = assess_bug_report_contents_score(base_design, buggy_design, bug_report)
+    assert 0.5 <= score <= 0.95, f"Expected high score, got {score}"

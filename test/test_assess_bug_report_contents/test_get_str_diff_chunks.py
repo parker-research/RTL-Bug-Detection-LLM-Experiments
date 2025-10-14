@@ -86,3 +86,57 @@ def test_completely_different() -> None:
     assert len(diffs) == 1, "Should find 1 diff chunk"
     assert diffs[0].old_version == "old text"
     assert diffs[0].new_version == "new text"
+
+
+def test_remove_chunk_of_original() -> None:
+    """Test that removing a chunk from the original is detected with a null new_version.
+
+    This case isn't particularly easy to check that the bug logic is correct.
+    """
+    base_design = """
+// 3:8 Decoder
+// Decodes a 3-bit input into one of 8 output lines.
+// Optional enable input for controlling decoder operation.
+
+module decoder_3to8 (
+    input wire [2:0] in,    // 3-bit input
+    input wire enable,      // Enable signal (active high)
+    output reg [7:0] out    // 8-bit output (one-hot encoded)
+);
+    always @(*) begin
+        if (enable) begin
+            case (in)
+                3'b000: out = 8'b00000001;  // Output 0 active
+                3'b001: out = 8'b00000010;  // Output 1 active
+                3'b010: out = 8'b00000100;  // Output 2 active
+                3'b011: out = 8'b00001000;  // Output 3 active
+                3'b100: out = 8'b00010000;  // Output 4 active
+                3'b101: out = 8'b00100000;  // Output 5 active
+                3'b110: out = 8'b01000000;  // Output 6 active
+                3'b111: out = 8'b10000000;  // Output 7 active
+                default: out = 8'b00000000;
+            endcase
+        end else begin
+            out = 8'b00000000;  // All outputs low when disabled
+        end
+    end
+
+endmodule
+"""
+
+    # Remove the 17th line.
+    assert (
+        base_design.splitlines()[16].strip()
+        == "3'b011: out = 8'b00001000;  // Output 3 active"
+    )
+    buggy_design = "\n".join(
+        base_design.splitlines()[0:16] + base_design.splitlines()[18:]
+    )
+
+    diffs = get_str_diff_chunks(base_design, buggy_design)
+    assert len(diffs) == 1, f"Should find 1 diff chunk, got {len(diffs)}: {diffs}"
+    assert "3'b011: out = 8'b00001000;" in diffs[0].old_version
+    assert "// Output 3 active" in diffs[0].old_version
+    assert diffs[0].new_version.strip() == "", (
+        "New version should be empty because it was a strict removal"
+    )
