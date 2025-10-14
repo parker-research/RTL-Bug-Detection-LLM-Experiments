@@ -163,3 +163,32 @@ def get_str_diff_chunks(old_text: str, new_text: str) -> list[StringDiff]:
 
     # Remove empty diffs (caused by whitespace-only changes).
     return [d for d in diffs if d.old_version != d.new_version]
+
+
+def extract_markdown_code_blocks(markdown: str) -> list[str]:
+    """Extract code blocks from markdown text.
+
+    Ignores the language specifier after the opening backticks.
+
+    Args:
+        markdown: The markdown text to extract code blocks from.
+
+    Returns:
+        List of code block contents.
+
+    """
+    code_blocks: list[str] = []
+    in_code_block: bool = False
+    current_block: list[str] = []
+
+    for line in markdown.splitlines():
+        if line.strip().startswith("```") and (in_code_block is False):
+            in_code_block = True
+            current_block = []
+        elif line.strip().startswith("```") and (in_code_block is True):
+            in_code_block = False
+            code_blocks.append("\n".join(current_block))
+        elif in_code_block is True:
+            current_block.append(line)
+
+    return code_blocks
