@@ -9,6 +9,10 @@ import polars as pl
 import tyro
 from loguru import logger
 
+from rtl_bug_detection_llm_experiments.assess_bug_report_contents import (
+    assess_bug_report_contents_score,
+)
+
 
 def _read_any_table(path: Path) -> pl.DataFrame:
     """Read a table from a file, inferring the format from the file extension."""
@@ -21,6 +25,23 @@ def _read_any_table(path: Path) -> pl.DataFrame:
 
     msg = f"Unsupported file format: {path.suffix}"
     raise ValueError(msg)
+
+
+def _assess_bug_report_contents_score_all_cases(
+    base_code: str, buggy_code: str, bug_report: str
+) -> float | None:
+    """Assess the bug report contents score for all cases."""
+    if base_code == buggy_code:
+        return None
+
+    if "```" not in bug_report:
+        return 0.0
+
+    return assess_bug_report_contents_score(
+        base_code=base_code,
+        buggy_code=buggy_code,
+        bug_report=bug_report,
+    )
 
 
 def analyze_response(input_table_data_path: Path | str) -> None:
@@ -42,7 +63,7 @@ def analyze_response(input_table_data_path: Path | str) -> None:
             .otherwise(pl.lit("unknown"))
             .cast(pl.Enum(["contains_bug", "no_bug"]))
         ),
-        actual_detection_result=(
+        experimental_detection_result=(
             pl.when(pl.col("llm_response").str.contains("No modifications detected"))
             .then(pl.lit("no_bug"))
             .when(pl.col("llm_response").str.len_chars() < pl.lit(20))
@@ -55,11 +76,44 @@ def analyze_response(input_table_data_path: Path | str) -> None:
     )
     df.write_parquet(out_dir / "10_llm_bug_detection_data_with_analysis.pq")
 
+    # For the buggy files, get a copy of the non-buggy file, so that we can compare and
+    # then see if the LLM detected the correct bug.
+    df = df.join(
+        (
+            df.filter(pl.col("expected_detection_result") == pl.lit("no_bug"))
+            .select(
+                "challenge_id",
+                base_file_contents=pl.col("input_file_contents"),
+            )
+            .unique()
+        ),
+        on="challenge_id",
+        how="left",
+        validate="m:1",
+    )
+    df = df.with_columns(
+        bug_report_score=(
+            pl.struct(["llm_response", "input_file_contents", "base_file_contents"])
+            .map_elements(
+                lambda row: _assess_bug_report_contents_score_all_cases(
+                    base_code=row["base_file_contents"],
+                    buggy_code=row["input_file_contents"],
+                    bug_report=row["llm_response"],
+                )
+                if row["base_file_contents"] != row["input_file_contents"]
+                else None,
+                return_dtype=pl.Float64,
+            )
+            .round(4)
+        )
+    )
+    df.write_parquet(out_dir / "20_llm_bug_detection_data_with_scores.pq")
+
     rows_count = df.height
     df_confusion_matrix = (
-        df.group_by(["expected_detection_result", "actual_detection_result"])
+        df.group_by(["expected_detection_result", "experimental_detection_result"])
         .agg(count=pl.len(), percent=(pl.len() / rows_count * 100).round(2))
-        .sort(["expected_detection_result", "actual_detection_result"])
+        .sort(["expected_detection_result", "experimental_detection_result"])
     )
     df_confusion_matrix.write_parquet(out_dir / "confusion_matrix.pq")
     logger.info(f"Confusion matrix: {df_confusion_matrix}")
@@ -71,7 +125,7 @@ def analyze_response(input_table_data_path: Path | str) -> None:
             correct_overall=(
                 (
                     pl.col("expected_detection_result")
-                    == pl.col("actual_detection_result")
+                    == pl.col("experimental_detection_result")
                 )
                 .cast(pl.Int64)
                 .sum()
@@ -79,7 +133,7 @@ def analyze_response(input_table_data_path: Path | str) -> None:
             correctly_detected_bug=(
                 (
                     (pl.col("expected_detection_result") == "contains_bug")
-                    & (pl.col("actual_detection_result") == "contains_bug")
+                    & (pl.col("experimental_detection_result") == "contains_bug")
                 )
                 .cast(pl.Int64)
                 .sum()
@@ -87,7 +141,7 @@ def analyze_response(input_table_data_path: Path | str) -> None:
             correctly_detected_no_bug=(
                 (
                     (pl.col("expected_detection_result") == "no_bug")
-                    & (pl.col("actual_detection_result") == "no_bug")
+                    & (pl.col("experimental_detection_result") == "no_bug")
                 )
                 .cast(pl.Int64)
                 .sum()

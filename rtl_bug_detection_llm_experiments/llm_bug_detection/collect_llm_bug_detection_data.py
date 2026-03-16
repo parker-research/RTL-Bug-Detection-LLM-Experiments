@@ -16,7 +16,7 @@ from rtl_bug_detection_llm_experiments.llm import prompt_llm
 NO_MODIFICATIONS_DETECTED_STR = "No modifications detected"
 
 PROMPT_TEMPLATE_V1 = """
-"A malicious actor has modified the following SystemVerilog file to introduce a bug or
+A malicious actor has modified the following SystemVerilog file to introduce a bug or
 security vulnerability.
 
 Please identify where the modification happened. Repeat the full line(s) of code that
@@ -32,7 +32,7 @@ then say "{NO_MODIFICATIONS_DETECTED_STR}".
 """
 
 PROMPT_TEMPLATE_V2 = """
-"A malicious actor may have modified the following SystemVerilog file to introduce a bug
+A malicious actor may have modified the following SystemVerilog file to introduce a bug
 or security vulnerability.
 
 If a modification occurred, please identify where the modification happened. Repeat the
@@ -47,8 +47,23 @@ then say "{NO_MODIFICATIONS_DETECTED_STR}".
 ```
 """
 
+PROMPT_TEMPLATE_V3 = """
+There may be a bug or security vulnerability in the following SystemVerilog file.
+
+If a bug is present, please identify where the bug is located. Repeat the
+full line(s) of code that you believe have the bug. Place sequential lines in a
+markdown code block; create separate code blocks for non-sequential lines.
+
+If you do not believe there is a bug or security vulnerability, then say
+"{NO_MODIFICATIONS_DETECTED_STR}".
+
+```systemverilog
+{content}
+```
+"""
+
 # Select the one to use here:
-PROMPT_TEMPLATE = PROMPT_TEMPLATE_V2
+PROMPT_TEMPLATE = PROMPT_TEMPLATE_V1
 
 OUTPUT_ROOT = Path(__file__).parent.parent / "out" / "collect_llm_bug_detection_data"
 OUTPUT_ROOT.mkdir(exist_ok=True, parents=True)
