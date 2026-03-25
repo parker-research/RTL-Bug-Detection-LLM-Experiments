@@ -412,7 +412,7 @@ def obfuscate_all_files_cursively_in_place(input_dir: Path) -> None:
 
 def main() -> None:
     """Command-line interface."""
-    if len(sys.argv) < 2:  # noqa: PLR2004
+    if len(sys.argv) < 2:
         logger.info("Usage: python verilog_obfuscate.py path/to/design.v")
         sys.exit(1)
     p = Path(sys.argv[1])

@@ -175,7 +175,7 @@ def split_module_into_chunks(module_text: str) -> list[Chunk]:
         s, e = nearest_span
         text = body[s:e]
         # classify pinnedness
-        pinned = nearest_kind in ("generate",)
+        pinned = nearest_kind == "generate"
         assert nearest_kind is not None
         c = Chunk(
             kind=nearest_kind,

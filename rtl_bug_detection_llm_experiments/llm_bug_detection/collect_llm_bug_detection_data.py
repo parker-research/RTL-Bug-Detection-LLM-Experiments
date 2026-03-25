@@ -5,8 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-import fire  # pyright: ignore[reportMissingTypeStubs]
 import orjson
+import tyro
 import uuid_extension
 from loguru import logger
 from tqdm import tqdm
@@ -127,7 +127,7 @@ def scan_directory(
 
 def main() -> None:
     """Run main entry point for the script."""
-    fire.Fire(scan_directory)  # pyright: ignore[reportUnknownMemberType]
+    tyro.cli(scan_directory)
 
 
 if __name__ == "__main__":

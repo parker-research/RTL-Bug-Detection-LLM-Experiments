@@ -224,7 +224,7 @@ def assess_bug_report_contents_score(
         diff_new_norm = _normalize_whitespace(
             # Generally (ideally) use the buggy version (new_version).
             diff.new_version
-            if diff.new_version
+            if len(diff.new_version) > 0
             # In cases where the bug insertion is due to line removal, then judge it
             # based on a diff to the base non-buggy version.
             # Has test case for this branch.

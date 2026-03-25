@@ -5,8 +5,8 @@ Data is produced by `collect_llm_bug_detection_data.py`.
 
 from pathlib import Path
 
-import fire  # pyright: ignore[reportMissingTypeStubs]
 import polars as pl
+import tyro
 from loguru import logger
 
 
@@ -26,7 +26,7 @@ def _read_any_table(path: Path) -> pl.DataFrame:
 def analyze_response(input_table_data_path: Path | str) -> None:
     """Analyze LLM bug detection data."""
     input_table_data_path = Path(input_table_data_path)
-    df = _read_any_table(input_table_data_path)
+    df: pl.DataFrame = _read_any_table(input_table_data_path)
     logger.info(f"Read {len(df)} rows from {input_table_data_path}")
 
     out_dir = input_table_data_path.with_name(input_table_data_path.stem + "_analysis")
@@ -122,7 +122,7 @@ def analyze_response(input_table_data_path: Path | str) -> None:
 
 def main() -> None:
     """Analyze LLM bug detection data."""
-    fire.Fire(analyze_response)  # pyright: ignore[reportUnknownMemberType]
+    tyro.cli(analyze_response)
 
 
 if __name__ == "__main__":
