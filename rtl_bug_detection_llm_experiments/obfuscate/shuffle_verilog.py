@@ -268,7 +268,7 @@ def reorder_assign_blocks_in_module(
             comp_list = strongly_connected_components(len(assign_texts), graph_out)
             # comp_list are components in terms of node indices 0..len(assign_texts)-1
             # Convert to original assign indices
-            comps_original_idx = []
+            comps_original_idx: list[list[int]] = []
             for comp in comp_list:
                 comps_original_idx.append([block_indices[idx] for idx in comp])
 
@@ -382,7 +382,7 @@ def cli() -> None:
     with open(args.infile, encoding="utf-8") as f:
         text = f.read()
 
-    new_text, count = process_file(
+    new_text, _count = process_file(
         text, seed=args.seed, min_block_size=args.min_block_size
     )
 

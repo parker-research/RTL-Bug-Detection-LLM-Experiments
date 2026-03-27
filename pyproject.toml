@@ -46,6 +46,9 @@ ignore = [
     "PLR2004", # Allow magic numbers.
     "D203",
     "D213",
+    "D", # Disable docs requirements.
+    "E501", # Allow long lines.
+    "C901", # Allow complex functions.
 ]
 
 [tool.ruff.lint.per-file-ignores]
