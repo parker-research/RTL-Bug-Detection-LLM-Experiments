@@ -95,13 +95,15 @@ def analyze_response(input_table_data_path: Path | str) -> None:
         bug_report_score=(
             pl.struct(["llm_response", "input_file_contents", "base_file_contents"])
             .map_elements(
-                lambda row: _assess_bug_report_contents_score_all_cases(
-                    base_code=row["base_file_contents"],
-                    buggy_code=row["input_file_contents"],
-                    bug_report=row["llm_response"],
-                )
-                if row["base_file_contents"] != row["input_file_contents"]
-                else None,
+                lambda row: (
+                    _assess_bug_report_contents_score_all_cases(
+                        base_code=row["base_file_contents"],
+                        buggy_code=row["input_file_contents"],
+                        bug_report=row["llm_response"],
+                    )
+                    if row["base_file_contents"] != row["input_file_contents"]
+                    else None
+                ),
                 return_dtype=pl.Float64,
             )
             .round(4)
