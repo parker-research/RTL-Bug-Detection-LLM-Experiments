@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Literal, assert_never
 
 import orjson
 import tyro
@@ -61,8 +62,7 @@ If you do not believe there is a bug or security vulnerability, then say
 ```
 """
 
-# Select the one to use here:
-PROMPT_TEMPLATE = PROMPT_TEMPLATE_V1
+PromptVersionLiteral = Literal["v1", "v2", "v3"]
 
 OUTPUT_ROOT = Path(__file__).parent.parent / "out" / "collect_llm_bug_detection_data"
 OUTPUT_ROOT.mkdir(exist_ok=True, parents=True)
@@ -83,12 +83,21 @@ class LlmPromptResult:
     llm_model_name: str
 
 
-def construct_llm_prompt(sv_code: str) -> str:
+def construct_llm_prompt(sv_code: str, prompt_version: PromptVersionLiteral) -> str:
     """Prompt GPT to analyze a single SystemVerilog file for potential bugs.
 
     Return the result from GPT, or None if there was an error.
     """
-    return PROMPT_TEMPLATE.format(
+    if prompt_version == "v1":
+        prompt_template = PROMPT_TEMPLATE_V1
+    elif prompt_version == "v2":
+        prompt_template = PROMPT_TEMPLATE_V2
+    elif prompt_version == "v3":
+        prompt_template = PROMPT_TEMPLATE_V3
+    else:
+        assert_never(prompt_version)
+
+    return prompt_template.format(
         content=sv_code,
         NO_MODIFICATIONS_DETECTED_STR=NO_MODIFICATIONS_DETECTED_STR,
     )
@@ -97,12 +106,30 @@ def construct_llm_prompt(sv_code: str) -> str:
 def scan_directory(
     *,
     input_dir: Path | str,
-    output_ndjson_path: Path | str,
+    output_path: Path | str,
     llm_model_name: LlmModelNameLiteral,
+    prompt_version: PromptVersionLiteral,
 ) -> None:
-    """Scan all SystemVerilog files in the given directory for potential bugs."""
+    """Scan all SystemVerilog files in the given directory for potential bugs.
+
+    Args:
+        - input_dir: Directory to scan.
+        - output_path: Path to write results to. If this is a directory, a single ndjson file
+            will be written to that directory with a decent name.
+    """
     input_dir = Path(input_dir)
-    output_ndjson_path = Path(output_ndjson_path)
+
+    if Path(output_path).is_dir():
+        output_ndjson_file = (
+            Path(output_path)
+            / f"prompt_{prompt_version}_{llm_model_name}_{log_file_date_time}.ndjson"
+        )
+    else:
+        output_ndjson_file = Path(output_path)
+
+    if output_ndjson_file.exists():
+        msg = f"Output file {output_ndjson_file} already exists."
+        raise FileExistsError(msg)
 
     file_count = 0
     results: list[LlmPromptResult] = []
@@ -117,7 +144,7 @@ def scan_directory(
 
         file_contents = file_path.read_text(encoding="utf-8")
         prompt = construct_llm_prompt(
-            sv_code=file_contents,
+            sv_code=file_contents, prompt_version=prompt_version
         )
         response: str = prompt_llm(prompt, model=llm_model_name)
 
@@ -131,8 +158,8 @@ def scan_directory(
         )
         results.append(result)
 
-        with output_ndjson_path.open("ab") as output_ndjson_file:
-            output_ndjson_file.write(orjson.dumps(result) + b"\n")
+        with output_ndjson_file.open("ab") as open_file:
+            open_file.write(orjson.dumps(result, option=orjson.OPT_APPEND_NEWLINE))
 
         file_count += 1
 
