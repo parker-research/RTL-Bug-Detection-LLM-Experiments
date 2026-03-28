@@ -207,7 +207,7 @@ def ask_llm_for_mapping_from_file(masked_text: str) -> dict[str, str]:
     """Query the LLM once with the entire file. Validate and return a mapping."""
     prompt = build_prompt_for_full_file(masked_text)
     logger.info("[LLM] Requesting full-file rename mapping...")
-    resp = prompt_llm(prompt)
+    resp = prompt_llm(prompt, model="gpt-5.4-nano")
 
     parsed = extract_json_substring(resp)
     if parsed is None:

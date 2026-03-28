@@ -1,3 +1,5 @@
+# pyright: basic
+
 import random
 import re
 import sys
@@ -90,8 +92,10 @@ def split_module_body(body: str) -> list[Chunk]:
         if nearest > idx:
             chunks.append(Chunk(kind="pinned", text=body[idx:nearest], pinned=True))
         # matched chunk
+        assert nearest_span is not None
         s, e = nearest_span
         this_text = body[s:e]
+        assert nearest_kind is not None
         chunks.append(Chunk(kind=nearest_kind, text=this_text, pinned=False))
         idx = e
     return chunks

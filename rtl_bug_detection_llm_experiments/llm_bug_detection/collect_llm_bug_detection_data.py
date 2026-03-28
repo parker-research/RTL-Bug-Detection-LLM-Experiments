@@ -3,7 +3,6 @@
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
 
 import orjson
 import tyro
@@ -11,7 +10,7 @@ import uuid_extension
 from loguru import logger
 from tqdm import tqdm
 
-from rtl_bug_detection_llm_experiments.llm import prompt_llm
+from rtl_bug_detection_llm_experiments.llm import LlmModelNameLiteral, prompt_llm
 
 NO_MODIFICATIONS_DETECTED_STR = "No modifications detected"
 
@@ -99,7 +98,7 @@ def scan_directory(
     *,
     input_dir: Path | str,
     output_ndjson_path: Path | str,
-    llm_model_name: Literal["gpt-4o", "gpt-5", "gpt-5-mini", "gpt-5-nano"] = "gpt-4o",
+    llm_model_name: LlmModelNameLiteral,
 ) -> None:
     """Scan all SystemVerilog files in the given directory for potential bugs."""
     input_dir = Path(input_dir)

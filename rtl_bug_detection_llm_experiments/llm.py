@@ -10,11 +10,18 @@ load_dotenv()
 
 client = openai.OpenAI()
 
+# https://developers.openai.com/api/docs/pricing
+LlmModelNameLiteral = Literal[
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.4-nano",
+]
+
 
 def prompt_llm(
     prompt: str,
     *,
-    model: Literal["gpt-4o", "gpt-5", "gpt-5-mini", "gpt-5-nano"] = "gpt-4o",
+    model: LlmModelNameLiteral,
     temperature: float | None = None,
 ) -> str:
     """Prompt GPT with a basic string and return the result.
@@ -47,5 +54,5 @@ def prompt_llm(
 if __name__ == "__main__":
     prompt = input("Enter your prompt: ")
     logger.debug(f"User prompt: {prompt}")
-    response = prompt_llm(prompt)
+    response = prompt_llm(prompt, model="gpt-5.4-nano")
     logger.info(f"LLM response: {response}")

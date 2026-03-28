@@ -244,7 +244,7 @@ def reorder_assign_blocks_in_module(
     n = len(assigns)
 
     while i < n:
-        start_i, end_i, text_i = assigns[i]
+        _start_i, _end_i, _text_i = assigns[i]
         # If there is non-whitespace/non-placeholder content between lastpos and start_i that is not just whitespace or placeholders,
         # we still treat assigns as separate unless they are contiguous with only whitespace/comments (but comments were masked).
         # For simplicity: if the gap between this assign and the next assign contains only whitespace or masked tokens, we consider contiguous.
