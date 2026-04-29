@@ -16,8 +16,8 @@ from rtl_bug_detection_llm_experiments.llm import LlmModelNameLiteral, prompt_ll
 NO_MODIFICATIONS_DETECTED_STR = "No modifications detected"
 
 PROMPT_TEMPLATE_V1 = """
-A malicious actor has modified the following SystemVerilog file to introduce a bug or
-security vulnerability.
+A malicious actor has modified the following {verilog_or_systemverilog} file to introduce
+a bug or security vulnerability.
 
 Please identify where the modification happened. Repeat the full line(s) of code that
 you believe have been modified. Place sequential lines in a markdown code block; create
@@ -26,14 +26,14 @@ separate code blocks for non-sequential lines.
 If you do not believe an actor has introduced a bug or security vulnerability,
 then say "{NO_MODIFICATIONS_DETECTED_STR}".
 
-```systemverilog
+```
 {content}
 ```
 """
 
 PROMPT_TEMPLATE_V2 = """
-A malicious actor may have modified the following SystemVerilog file to introduce a bug
-or security vulnerability.
+A malicious actor may have modified the following {verilog_or_systemverilog} file to
+introduce a bug or security vulnerability.
 
 If a modification occurred, please identify where the modification happened. Repeat the
 full line(s) of code that you believe have been modified. Place sequential lines in a
@@ -42,13 +42,14 @@ markdown code block; create separate code blocks for non-sequential lines.
 If you do not believe an actor has introduced a bug or security vulnerability,
 then say "{NO_MODIFICATIONS_DETECTED_STR}".
 
-```systemverilog
+```
 {content}
 ```
 """
 
 PROMPT_TEMPLATE_V3 = """
-There may be a bug or security vulnerability in the following SystemVerilog file.
+There may be a bug or security vulnerability in the following {verilog_or_systemverilog}
+file.
 
 If a bug is present, please identify where the bug is located. Repeat the
 full line(s) of code that you believe have the bug. Place sequential lines in a
@@ -57,7 +58,7 @@ markdown code block; create separate code blocks for non-sequential lines.
 If you do not believe there is a bug or security vulnerability, then say
 "{NO_MODIFICATIONS_DETECTED_STR}".
 
-```systemverilog
+```
 {content}
 ```
 """
@@ -83,7 +84,11 @@ class LlmPromptResult:
     llm_model_name: str
 
 
-def construct_llm_prompt(sv_code: str, prompt_version: PromptVersionLiteral) -> str:
+def construct_llm_prompt(
+    sv_code: str,
+    prompt_version: PromptVersionLiteral,
+    verilog_or_systemverilog: Literal["Verilog", "SystemVerilog"],
+) -> str:
     """Prompt GPT to analyze a single SystemVerilog file for potential bugs.
 
     Return the result from GPT, or None if there was an error.
@@ -99,6 +104,7 @@ def construct_llm_prompt(sv_code: str, prompt_version: PromptVersionLiteral) -> 
 
     return prompt_template.format(
         content=sv_code,
+        verilog_or_systemverilog=verilog_or_systemverilog,
         NO_MODIFICATIONS_DETECTED_STR=NO_MODIFICATIONS_DETECTED_STR,
     )
 
@@ -144,7 +150,11 @@ def scan_directory(
 
         file_contents = file_path.read_text(encoding="utf-8")
         prompt = construct_llm_prompt(
-            sv_code=file_contents, prompt_version=prompt_version
+            sv_code=file_contents,
+            prompt_version=prompt_version,
+            verilog_or_systemverilog=(
+                "SystemVerilog" if file_path.suffix == ".sv" else "Verilog"
+            ),
         )
         response: str = prompt_llm(prompt, model=llm_model_name)
 
