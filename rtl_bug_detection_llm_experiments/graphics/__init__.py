@@ -1,0 +1,1 @@
+"""Generate graphics for thesis."""
