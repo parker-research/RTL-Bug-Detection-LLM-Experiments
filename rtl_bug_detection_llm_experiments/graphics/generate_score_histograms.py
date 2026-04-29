@@ -64,7 +64,7 @@ def generate_score_histogram(
 
         ax.hist(
             filtered["bug_report_score"],
-            bins=20,
+            bins=10,
             color=color,
             edgecolor="white",
             linewidth=0.6,
