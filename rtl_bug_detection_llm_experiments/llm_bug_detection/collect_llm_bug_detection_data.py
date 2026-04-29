@@ -11,6 +11,7 @@ import uuid_extension
 from loguru import logger
 from tqdm import tqdm
 
+from rtl_bug_detection_llm_experiments.common import data_out_dir_for
 from rtl_bug_detection_llm_experiments.llm import LlmModelNameLiteral, prompt_llm
 
 NO_MODIFICATIONS_DETECTED_STR = "No modifications detected"
@@ -65,7 +66,7 @@ If you do not believe there is a bug or security vulnerability, then say
 
 PromptVersionLiteral = Literal["v1", "v2", "v3"]
 
-OUTPUT_ROOT = Path(__file__).parent.parent / "out" / "collect_llm_bug_detection_data"
+OUTPUT_ROOT = data_out_dir_for(__file__) / "logs"
 OUTPUT_ROOT.mkdir(exist_ok=True, parents=True)
 
 log_file_date_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")  # noqa: DTZ005
