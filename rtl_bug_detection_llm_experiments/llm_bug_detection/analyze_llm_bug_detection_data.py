@@ -225,6 +225,13 @@ def analyze_response(input_table_data_path: Path | str) -> None:
         )
     )
     df.write_csv(out_dir / "20_llm_bug_detection_data_with_scores.csv")
+    df.write_parquet(
+        # CSVs do a bad job of preserving multiline Verilog files.
+        out_dir / "20_llm_bug_detection_data_with_scores.parquet"
+    )
+    df.drop(
+        "base_file_contents", "input_file_contents", "llm_prompt", "llm_response"
+    ).write_csv(out_dir / "21_llm_bug_detection_data_with_scores_no_contents.csv")
 
     # ------------------------------------------------------------------
     # Step 3 - Confusion matrix (raw counts + %)
