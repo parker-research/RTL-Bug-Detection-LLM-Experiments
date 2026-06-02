@@ -55,6 +55,7 @@ from tqdm import tqdm
 
 from rtl_bug_detection_llm_experiments.llm import prompt_llm
 from rtl_bug_detection_llm_experiments.verilog_spec import (
+    VERILOG_AND_SYSTEMVERILOG_KEYWORDS_FROM_SPEC,
     VERILOG_DECLARATION_KEYWORDS,
     VERILOG_KEYWORDS,
     VERILOG_SYSTEM_IDENTIFIERS,
@@ -67,6 +68,7 @@ from rtl_bug_detection_llm_experiments.verilog_spec import (
 
 # Rough identifier regex for Verilog (escaped ids like \... are not handled).
 VERILOG_IDENTIFIER_REGEX = r"[A-Za-z_][A-Za-z0-9_$]*"
+
 
 # ---------------------------
 # Masking comments/strings
@@ -148,6 +150,7 @@ def filter_candidates(raw_names: set[str]) -> set[str]:
             (n in VERILOG_SYSTEM_IDENTIFIERS)
             or (n in VERILOG_DECLARATION_KEYWORDS)
             or (n in VERILOG_KEYWORDS)
+            or (n in VERILOG_AND_SYSTEMVERILOG_KEYWORDS_FROM_SPEC)
         ):
             continue
 
