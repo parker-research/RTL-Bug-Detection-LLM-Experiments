@@ -18,6 +18,8 @@ from rtl_bug_detection_llm_experiments.common import (
     date_for_file_name,
 )
 
+# TODO: If re-generating this histogram, consider changing the Y-axis to a percent instead of a count to make the left two graphs a little easier to read.
+
 
 def generate_score_histogram(
     csv_paths: dict[str, Path], *, output_png_path: Path
@@ -26,6 +28,15 @@ def generate_score_histogram(
 
     csv_path should point to a CSV produced by `analyze_llm_bug_detection_data.py`, as
     the `21_llm_bug_detection_data_with_scores_no_contents.csv` step.
+
+    Example of stdin input:
+
+    ```json
+    {
+        "PROMPT_TEMPLATE_V1": "/tmp/v1/prompt_v1_gpt-5.4-nano_2026-04-29_analysis/21_llm_bug_detection_data_with_scores_no_contents.csv",
+        "PROMPT_TEMPLATE_V2": "/tmp/v2/prompt_v2_gpt-5.4-nano_2026-04-29_analysis/21_llm_bug_detection_data_with_scores_no_contents.csv"
+    }
+    ```
     """
     n = len(csv_paths)
 

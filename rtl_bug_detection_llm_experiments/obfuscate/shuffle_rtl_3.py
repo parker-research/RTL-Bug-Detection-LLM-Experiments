@@ -190,7 +190,7 @@ def split_module_into_chunks(module_text: str) -> list[Chunk]:
 
 
 # --- Reordering strategies ---
-def reorder_chunks(  # noqa: C901, PLR0912
+def reorder_chunks(  # noqa: PLR0912
     chunks: list[Chunk], seed: int = 0, level: str = "safe"
 ) -> tuple[list[Chunk], dict[str, list[str | None]]]:
     """Reorder chunk list and return (new_chunks, mapping).
